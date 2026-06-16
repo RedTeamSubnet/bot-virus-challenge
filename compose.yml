@@ -3,7 +3,16 @@ services:
     image: redteamsubnet61/rest-bv-challenge:0.0.0
     build:
       context: ./src/bv_challenge/challenge
+      platforms:
+        - linux/amd64
     restart: unless-stopped
+    networks:
+      - bot-virus-challenge-net
+      - bot-executor-net
+    platform: linux/amd64
+    privileged: true
+    ulimits:
+      nofile: 32768
     environment:
       TERM: ${TERM:-xterm}
       TZ: ${TZ:-Asia/Seoul}
@@ -18,3 +27,45 @@ services:
     ports:
       - "${BV_CHALLENGE_API_PORT:-10001}:${BV_CHALLENGE_API_PORT:-10001}"
     tty: true
+
+  bot-runner:
+    image: redteamsubnet61/bot_virus_bot_runner:latest
+    build:
+      context: ./src/modules/rest.mdm-sn-container-runner
+      platforms:
+        - linux/amd64
+    restart: unless-stopped
+    networks:
+      - bot-virus-challenge-net
+      - bot-executor-net
+    privileged: true
+    user: "0:0"
+    environment:
+      TERM: ${TERM:-xterm}
+      TZ: ${TZ:-UTC}
+      VM_RUNNER_API_PORT: ${VM_RUNNER_API_PORT:-8000}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - "bot-runner-logs:${VM_RUNNER_API_LOGS_DIR:-/var/log/rest.vm-runner}"
+      - "bot-runner-data:${VM_RUNNER_API_DATA_DIR:-/var/lib/rest.vm-runner}"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    ports:
+      - "${VM_RUNNER_API_PORT:-8000}:${VM_RUNNER_API_PORT:-8000}"
+    tty: true
+
+networks:
+  bot-virus-challenge-net:
+    name: bot-virus-challenge-net
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1400
+  bot-executor-net:
+    name: bot-executor-net
+    driver: bridge
+    internal: true
+
+volumes:
+  bot-runner-logs:
+  bot-runner-data:
