@@ -1,0 +1,12 @@
+services:
+  miner-api:
+    image: myhub/rest-bv-commit:latest
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      TERM: ${TERM:-xterm}
+      TZ: ${TZ:-Asia/Seoul}
+    ports:
+      - 10002:10002
+    tty: true

@@ -1,0 +1,20 @@
+services:
+  challenge-api:
+    image: redteamsubnet61/rest-bv-challenge:0.0.0
+    build:
+      context: ./src/bv_challenge/challenge
+    restart: unless-stopped
+    environment:
+      TERM: ${TERM:-xterm}
+      TZ: ${TZ:-Asia/Seoul}
+      BV_CHALLENGE_API_PORT: ${BV_CHALLENGE_API_PORT:-10001}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - "./volumes/configs/rest-bv-challenge:${BV_CHALLENGE_API_CONFIGS_DIR:-/etc/rest-bv-challenge}"
+      - "./volumes/storage/rest-bv-challenge/logs:${BV_CHALLENGE_API_LOGS_DIR:-/var/log/rest-bv-challenge}"
+      - "./volumes/storage/rest-bv-challenge/data:${BV_CHALLENGE_API_DATA_DIR:-/var/lib/rest-bv-challenge}"
+    ports:
+      - "${BV_CHALLENGE_API_PORT:-10001}:${BV_CHALLENGE_API_PORT:-10001}"
+    tty: true
