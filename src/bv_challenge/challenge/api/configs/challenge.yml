@@ -5,6 +5,11 @@ challenge:
   allowed_pip_pkg_dt: "2025-01-01T00:00:00Z"
   allowed_file_exts: [".py", ".json", ".yaml", ".yml", ".txt", ".pt"]
   bot_timeout: 120
+  # Layer 1/2 fallback score policy
+  gate_fail_score: 0.0
+  metrics_processor_error_score: 0.5
+  session_timeout_score: 0.0
+  runner_fail_score: 0.0
   window_width: 1420
   window_height: 740
   n_checkboxes: 5

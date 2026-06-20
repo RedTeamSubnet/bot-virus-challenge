@@ -24,6 +24,11 @@ class ChallengeConfig(FrozenBaseConfig):
         )  # type: ignore
     ] = Field(..., min_length=1)
     bot_timeout: int = Field(..., ge=1)
+    # Layer 1/2 fallback score policy (not detector secrets — just policy).
+    gate_fail_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    metrics_processor_error_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    session_timeout_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    runner_fail_score: float = Field(default=0.0, ge=0.0, le=1.0)
     window_width: int = Field(..., ge=20, le=12000)
     window_height: int = Field(..., ge=20, le=12000)
     n_checkboxes: int = Field(..., ge=2, le=100)
