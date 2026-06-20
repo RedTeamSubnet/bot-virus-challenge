@@ -342,51 +342,15 @@ def eval_bot(data: str) -> None:
 
 
 def compare_outputs(miner_input, miner_output, reference_output) -> dict:
+    """Disabled: the RTComparer backend is not wired into this build.
+
+    The previous implementation never actually invoked a comparer (it built a
+    string literal and then called ``.get`` on it), so every call silently
+    returned ``similarity_score: 0.0``. Until a real comparer is integrated this
+    raises so the caller surfaces an honest "not implemented" instead of a
+    misleading zero score.
     """
-    Compare miner's output against a reference output using CFGAnalyser and CFGComparer.
-
-    Args:
-        miner_input (dict): The input used for both miner outputs.
-        miner_output (dict): The output from the current miner (expects "bot_py" key).
-        reference_output (dict): The reference output.
-
-    Returns:
-        dict: Similarity score and reason.
-    """
-    try:
-        logger.info("Analyzing miner output...")
-
-        _miner_code = miner_output["bot_py"]
-        _reference_code = reference_output["bot_py"]
-
-        if not _miner_code or not _reference_code:
-            logger.error("Missing bot_py in miner_output or reference_output.")
-            return {
-                "similarity_score": 0.0,
-                "reason": "Missing bot_py in miner_output or reference_output",
-            }
-
-        _result = """RTComparer().compare(
-            challenge="bot-virus-challenge",
-            miner_script=_miner_code,
-            reference_script=_reference_code,
-        )"""
-
-        _similarity_score = _result.get("similarity_score", 0.0)
-        _reason = _result.get("reason", "Unknown")
-        logger.info(f"Similarity Score: {_similarity_score}")
-        logger.info(f"Similarity Reason: {_reason}")
-
-        try:
-            _similarity_score = float(_similarity_score)
-        except Exception:
-            _similarity_score = 0.0
-
-        return {"similarity_score": _similarity_score, "reason": _reason}
-
-    except Exception as err:
-        logger.error(f"Error in compare_outputs function: {str(err)}")
-        return {"similarity_score": 0.0, "reason": str(err)}
+    raise NotImplementedError("compare_outputs is not available in this build")
 
 
 __all__ = [

@@ -62,24 +62,21 @@ def post_score(
     _request_id = request.state.request_id
     logger.info(f"[{_request_id}] - Evaluating the miner output...")
 
-    _score: float = 0.0
     try:
-
         _score = service.score(miner_output=miner_output)
-
-        logger.success(f"[{_request_id}] - Successfully evaluated the miner output.")
+    except HTTPException:
+        # Already a well-formed HTTP error (e.g. TOO_MANY_REQUESTS) -- let it
+        # propagate so the client gets the real status, never a 200/null.
+        logger.error(f"[{_request_id}] - Failed to evaluate the miner output!")
+        raise
     except Exception as err:
-        if isinstance(err, HTTPException):
-            # raise
-            logger.error(
-                f"[{_request_id}] - Failed to evaluate the miner output!",
-            )
-
         logger.error(
-            f"[{_request_id}] - Failed to evaluate the miner output!",
+            f"[{_request_id}] - Unexpected error evaluating the miner output: {err}"
         )
-        # raise
-        return None
+        raise HTTPException(
+            status_code=500, detail="Failed to evaluate the miner output."
+        )
+
     logger.success(f"[{_request_id}] - Successfully scored the miner output: {_score}")
     return _score
 
@@ -171,9 +168,9 @@ def _post_eval_bot(
 
 @router.post(
     "/compare",
-    summary="Compare miner outputs",
-    description="This endpoint compares a miner's output to a reference output.",
-    responses={422: {}, 500: {}},
+    summary="Compare miner outputs (disabled)",
+    description="Disabled: the comparison backend is not wired into this build.",
+    responses={501: {}},
 )
 def post_compare(
     request: Request,
@@ -181,21 +178,13 @@ def post_compare(
     reference_output: dict = Body(...),
     miner_input: dict = Body(...),
 ):
+    # Disabled rather than silently returning a misleading 0.0 similarity. Re-enable
+    # by wiring a real comparer into service.compare_outputs and restoring the body.
     _request_id = request.state.request_id
-    logger.info(f"[{_request_id}] - Comparing miner outputs...")
-
-    try:
-        _score = service.compare_outputs(
-            miner_input=miner_input,
-            miner_output=miner_output,
-            reference_output=reference_output,
-        )
-        logger.success(f"[{_request_id}] - Successfully compared miner outputs.")
-    except Exception as err:
-        logger.error(f"[{_request_id}] - Error comparing miner outputs: {str(err)}")
-        raise HTTPException(status_code=500, detail="Error in comparison request")
-
-    return _score
+    logger.warning(f"[{_request_id}] - /compare is disabled (no comparison backend).")
+    raise HTTPException(
+        status_code=501, detail="Comparison endpoint is not available."
+    )
 
 
 __all__ = ["router"]
