@@ -1,1 +1,158 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="theme-color" content="#000000"/><link rel="icon" href="https://docs.theredteam.io/assets/images/logo.light.svg" type="image/svg+xml"/><title>Demo Login</title><script>window.APP_ID=`{{ nonce }}`,window.PUBLIC_KEY=`{{ public_key }}`,window.ACTIONS_LIST=`{{ actions_list | tojson | safe }}`</script><script defer=`defer" src="/static/js/main.b9668575.js"></script><link href="/static/css/main.963c38ad.css" rel="stylesheet"></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div><div id="actions-list-display"></div></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bot Virus — Demo Login</title>
+    <script>
+      // Injected by the challenge backend (see service.get_web).
+      // ACTIONS_LIST is a JSON *string* the automation reads via window.ACTIONS_LIST.
+      window.APP_ID = `{{ nonce }}`;
+      window.PUBLIC_KEY = `{{ public_key }}`;
+      window.ACTIONS_LIST = `{{ actions_list | tojson | safe }}`;
+
+      // Machine-readable task contract. Automation should target these stable
+      // selectors instead of parsing the visible English text on the page. These
+      // are plain DOM selectors only — no scoring logic or hints live here.
+      window.TASK_CONFIG = {
+        usernameInput: 'input[name="username"]',
+        passwordInput: 'input[name="password"]',
+        verifyButton: "#login-button",
+        scrollContainer: "#content",
+        endSessionButton: ".end-session",
+        payloadKey: "data"
+      };
+    </script>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --surface: #1a1d24;
+        --text: #e7e9ee;
+        --muted: #9aa0ad;
+        --accent: #4f7cff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      main {
+        max-width: 420px;
+        margin: 0 auto;
+        padding: 48px 20px 0;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin: 0 0 24px;
+      }
+      form {
+        display: grid;
+        gap: 12px;
+        background: var(--surface);
+        padding: 20px;
+        border-radius: 12px;
+      }
+      label {
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+      input {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #2a2e38;
+        border-radius: 8px;
+        background: #11141a;
+        color: var(--text);
+        font-size: 0.95rem;
+      }
+      input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      button {
+        padding: 10px 14px;
+        border: none;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #fff;
+        font-size: 0.95rem;
+        cursor: pointer;
+      }
+      button:hover {
+        filter: brightness(1.08);
+      }
+      /* Tall content so the automation must scroll to reach the end button. */
+      #content {
+        min-height: 1600px;
+        margin: 32px 0;
+        padding: 16px;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .end-session {
+        display: block;
+        width: 100%;
+        margin: 0 0 64px;
+        background: #2a2e38;
+      }
+      /* Checkbox targets rendered from the action list (absolute positioned). */
+      .cb {
+        position: absolute;
+        width: 22px;
+        height: 22px;
+        border: 2px solid var(--accent);
+        border-radius: 4px;
+        background: #11141a;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Demo Login</h1>
+      <form id="login-form" autocomplete="off" onsubmit="return false;">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="off" />
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="off" />
+        <button id="login-button" type="button">Sign in</button>
+      </form>
+
+      <section id="content">
+        <p>Verify you are human, then scroll down to end the session.</p>
+      </section>
+
+      <button class="end-session" type="button">End session</button>
+    </main>
+
+    <!-- Render checkbox targets from the action list (fidelity + visible click
+         targets). Kept tiny and inline; it carries no scoring logic. -->
+    <script>
+      (function renderCheckboxes() {
+        try {
+          var actions = JSON.parse(window.ACTIONS_LIST || "[]");
+          var flat = Array.isArray(actions[0]) ? actions[0] : actions;
+          for (var i = 0; i < flat.length; i++) {
+            var a = flat[i];
+            if (a && a.type === "click" && a.args && a.args.location) {
+              var box = document.createElement("div");
+              box.className = "cb";
+              box.style.left = a.args.location.x + "px";
+              box.style.top = a.args.location.y + "px";
+              document.body.appendChild(box);
+            }
+          }
+        } catch (e) {
+          /* no/invalid actions list — nothing to render */
+        }
+      })();
+    </script>
+
+    <!-- collector.js must load before sdk.js; both are classic scripts. -->
+    <script src="/static/js/collector.js" defer></script>
+    <script src="/static/js/sdk.js" defer></script>
+  </body>
+</html>
