@@ -30,6 +30,64 @@ except ImportError:  # private detector wheel not installed (local dev / CI)
     )
 
 
+# --- Layer 1 (public): structural shape validation --------------------------
+# This is deliberately *basic and non-secret*: it only checks that the decrypted
+# payload has the expected containers and that the (additive) advanced-signal
+# fields, when present, are the right type. It contains NO thresholds, weights,
+# or anti-bot heuristics — all of that lives in the private detector. Keeping a
+# cheap public shape gate here lets us reject obviously malformed / tampered
+# payloads before they ever reach the private wheel.
+
+# Legacy raw series that every well-formed payload must carry as lists.
+_REQUIRED_LIST_FIELDS = (
+    "movements",
+    "clicks",
+    "mouseDowns",
+    "mouseUps",
+    "keydowns",
+    "keyups",
+    "scroll",
+)
+# Advanced raw signals: validated only for *shape* when present (forward/backward
+# compatible — older payloads without them still pass this public gate).
+_OPTIONAL_LIST_FIELDS = ("eventSequence", "targets")
+_OPTIONAL_DICT_FIELDS = ("pageTimings", "trustedEventStats", "taskProgress")
+
+
+def validate_shape(data: Any) -> tuple[bool, str | None]:
+    """Public Layer 1 shape check. Returns (ok, reason).
+
+    Structural only: confirms the payload is a dict, the legacy raw series are
+    lists, and the advanced-signal fields (browserInfo / pageTimings /
+    eventSequence / targets / trustedEventStats / taskProgress) are correctly
+    typed when present. No behavioral judgement is made here.
+    """
+    if not isinstance(data, dict):
+        return False, "payload is not an object"
+
+    for _field in _REQUIRED_LIST_FIELDS:
+        if _field not in data:
+            return False, f"missing required field: {_field}"
+        if not isinstance(data[_field], list):
+            return False, f"field is not a list: {_field}"
+
+    for _field in _OPTIONAL_LIST_FIELDS:
+        if _field in data and not isinstance(data[_field], list):
+            return False, f"field is not a list: {_field}"
+
+    for _field in _OPTIONAL_DICT_FIELDS:
+        if _field in data and not isinstance(data[_field], dict):
+            return False, f"field is not an object: {_field}"
+
+    # browserInfo is an object when present, but may legitimately be null when the
+    # environment snapshot was unavailable in the browser.
+    if "browserInfo" in data and data["browserInfo"] is not None:
+        if not isinstance(data["browserInfo"], dict):
+            return False, "field is not an object: browserInfo"
+
+    return True, None
+
+
 def passes_gate(
     data: dict,
     gate: Callable[[dict], dict] | None = None,
@@ -106,4 +164,4 @@ def _coerce_score(value: Any) -> float | None:
     return score
 
 
-__all__ = ["passes_gate", "score_with_metrics_processor"]
+__all__ = ["validate_shape", "passes_gate", "score_with_metrics_processor"]
