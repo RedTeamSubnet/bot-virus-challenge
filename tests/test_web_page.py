@@ -1,9 +1,15 @@
-"""Tests for the /_web challenge page and the browser SDK.
+"""Tests for the /_web challenge page and the browser SDK (HBv6 non-behavioral).
+
+HBv6 scores non-behavioral browser/runtime/session integrity only. The page is
+deliberately minimal: it loads the SDK, which collects integrity signals and
+submits the encrypted payload to /_eval from the browser. There are no form
+fields, no verify button, no scroll content, and no behavioral collection.
 
 Two layers:
-  * Python: the /_web route serves the minimal page with the elements the
-    automation depends on, and the SDK assets are served by the static mount.
-  * Node: the SDK behaviour (writing localStorage["data"]) is proven by the
+  * Python: the /_web route serves the minimal verification page with the
+    config/session globals the SDK needs, and the SDK assets are served by the
+    static mount.
+  * Node: the SDK behaviour (auto-collect + encrypt + submit) is proven by the
     standalone JS suites under tests/web/, shelled out here so a single
     `pytest` run covers the whole browser-side flow. Skipped if node is absent.
 """
@@ -28,47 +34,64 @@ def test_web_page_loads() -> None:
     assert "text/html" in _response.headers["content-type"]
 
 
-def test_web_page_has_required_elements() -> None:
+def test_web_page_is_minimal_verification_page() -> None:
     _html = client.get("/_web").text
-    # Interactive elements the bot (and a human) act on.
-    assert 'name="username"' in _html
-    assert 'name="password"' in _html
-    assert 'id="login-button"' in _html
-    assert 'class="end-session"' in _html
-    # Tall content => the page is scrollable to reach the end button.
-    assert 'id="content"' in _html
+    # Minimal status page only.
+    assert "Browser verification" in _html
+    assert "Checking browser environment" in _html
+    assert 'id="status"' in _html
 
 
-def test_web_page_injects_backend_context_and_sdk() -> None:
+def test_web_page_has_no_form_or_behavioral_elements() -> None:
     _html = client.get("/_web").text
-    # Globals the automation reads.
-    assert "window.APP_ID" in _html
-    assert "window.PUBLIC_KEY" in _html
-    assert "window.ACTIONS_LIST" in _html
-    # SDK is wired in (collector before sdk).
-    assert "/static/js/collector.js" in _html
-    assert "/static/js/sdk.js" in _html
+    # No username/password fields, verify button, scroll content, or end button.
+    for _needle in (
+        'name="username"',
+        'name="password"',
+        'id="login-button"',
+        'id="content"',
+        "end-session",
+        "ACTIONS_LIST",
+    ):
+        assert _needle not in _html, _needle
 
 
-def test_web_page_exposes_task_config() -> None:
+def test_web_page_exposes_minimal_task_config() -> None:
     _html = client.get("/_web").text
-    # Machine-readable task contract for the automation (stable selectors only).
     assert "window.TASK_CONFIG" in _html
+    # Auto-submit is available and enabled.
+    assert '"/_eval"' in _html
+    assert "autoSubmit: true" in _html
+    assert '"data"' in _html
+    # Behavioral selector contract from the old page must be gone.
     for _key in (
         "usernameInput",
         "passwordInput",
         "verifyButton",
         "scrollContainer",
         "endSessionButton",
-        "payloadKey",
     ):
+        assert _key not in _html, _key
+
+
+def test_web_page_exposes_session_binding_globals() -> None:
+    _html = client.get("/_web").text
+    assert "window.BV_SESSION" in _html
+    for _key in ("sessionId", "nonce", "publicKeyId", "configHash", "schemaVersion"):
         assert _key in _html, _key
+    # Encryption key material the SDK needs for the browser-side submit.
+    assert "window.PUBLIC_KEY" in _html
+
+
+def test_web_page_wires_sdk() -> None:
+    _html = client.get("/_web").text
+    # SDK is wired in (collector before sdk).
+    assert "/static/js/collector.js" in _html
+    assert "/static/js/sdk.js" in _html
 
 
 def test_web_page_does_not_leak_scoring_internals() -> None:
     _html = client.get("/_web").text.lower()
-    # The public page must not reference the private detector / gate / thresholds,
-    # nor any of the advanced scoring internals (weights/penalties/sub-scores).
     for _needle in (
         "rt_bv_score",
         "metricsprocessor",
@@ -98,6 +121,20 @@ def test_sdk_assets_do_not_leak_scoring_internals() -> None:
             "self_consistency",
         ):
             assert _needle not in _js, f"{_needle} leaked into {_path}"
+
+
+def test_sdk_does_not_collect_behavior() -> None:
+    # The active flow must not wire mouse/keyboard/scroll/click behavior.
+    _js = client.get("/static/js/sdk.js").text
+    for _needle in (
+        "mousemove",
+        "mousedown",
+        "mouseup",
+        "keydown",
+        "keyup",
+        "addEventListener",
+    ):
+        assert _needle not in _js, _needle
 
 
 def test_sdk_assets_are_served() -> None:

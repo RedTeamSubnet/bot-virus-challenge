@@ -1,300 +1,243 @@
 "use strict";
 
 /**
- * Integration test for the browser SDK against a minimal hand-rolled DOM +
- * localStorage shim (no jsdom/playwright needed). Proves the core requirements:
- *   - after interaction the SDK writes a well-formed payload to localStorage,
- *   - the advanced raw signals (browserInfo, eventSequence, targets,
- *     trustedEventStats, taskProgress, pageTimings) are collected,
- *   - NO typed characters / credential values are ever captured.
+ * Integration test for the HBv6 browser SDK against a minimal hand-rolled DOM +
+ * WebCrypto + fetch shim (no jsdom/playwright needed). Proves the requirements:
+ *   - on load the SDK auto-collects NON-behavioral integrity signals
+ *     (browserInfo + automation/runtimeIntegrity/apiAvailability/fingerprint/
+ *      navigator/display/correlation/sessionBinding),
+ *   - it submits the encrypted payload to TASK_CONFIG.evalUrl via fetch(),
+ *   - window.BV_SUBMITTED flips true after a successful submit,
+ *   - submission happens with NO behavioral input (no mouse/keyboard/scroll),
+ *   - the encrypted blob is the hybrid wire format the server decryptor expects
+ *     (key "::" iv "::" text) and round-trips back to the exact payload,
+ *   - the payload carries no behavioral fields beyond the empty legacy arrays.
  *
  *   node tests/web/sdk.test.js
  */
 
 const assert = require("assert");
 const path = require("path");
+const { webcrypto } = require("crypto");
 
+const subtle = webcrypto.subtle;
 const JS_DIR = path.join(
-  __dirname,
-  "..",
-  "..",
-  "src",
-  "bv_challenge",
-  "challenge",
-  "templates",
-  "html",
-  "static",
-  "js"
+  __dirname, "..", "..", "src", "bv_challenge", "challenge",
+  "templates", "html", "static", "js"
 );
 
-// --- minimal event-target / DOM shim --------------------------------------
-function makeTarget(extra) {
-  const handlers = {};
-  return Object.assign(
-    {
-      addEventListener(type, fn) {
-        (handlers[type] = handlers[type] || []).push(fn);
-      },
-      dispatch(type, evt) {
-        (handlers[type] || []).forEach((fn) => fn(evt || {}));
-      },
-      getBoundingClientRect() {
-        return { left: 100, top: 400, width: 200, height: 40 };
-      }
-    },
-    extra || {}
+// ALPHANUM_CUSTOM_REGEX from the server (api/core/constants/_regex.py).
+const DATA_REGEX = /^[0-9a-zA-Z_\-:+/=]+$/;
+
+function b64ToBytes(b64) {
+  return new Uint8Array(Buffer.from(b64, "base64"));
+}
+function bytesToPemSpki(buf) {
+  const b64 = Buffer.from(buf).toString("base64");
+  const lines = b64.match(/.{1,64}/g).join("\n");
+  return `-----BEGIN PUBLIC KEY-----\n${lines}\n-----END PUBLIC KEY-----`;
+}
+
+async function decryptBlob(blob, privateKey) {
+  const [encKeyB64, encIvB64, ctB64] = blob.split("::");
+  const rawKey = await subtle.decrypt({ name: "RSA-OAEP" }, privateKey, b64ToBytes(encKeyB64));
+  const iv = await subtle.decrypt({ name: "RSA-OAEP" }, privateKey, b64ToBytes(encIvB64));
+  const aesKey = await subtle.importKey("raw", rawKey, { name: "AES-CBC" }, false, ["decrypt"]);
+  const ptBuf = await subtle.decrypt(
+    { name: "AES-CBC", iv: new Uint8Array(iv) }, aesKey, b64ToBytes(ctB64)
   );
+  return {
+    rawKey: new Uint8Array(rawKey),
+    iv: new Uint8Array(iv),
+    plaintext: Buffer.from(ptBuf).toString("utf-8")
+  };
 }
 
-const usernameEl = makeTarget({ id: "username", name: "username" });
-const passwordEl = makeTarget({ id: "password", name: "password" });
-const loginBtn = makeTarget({ id: "login-button" });
-const endBtn = makeTarget({ className: "end-session" });
+async function main() {
+  // --- generate the session RSA keypair (RSA-OAEP / SHA-256), as the server does
+  const keyPair = await subtle.generateKey(
+    { name: "RSA-OAEP", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["encrypt", "decrypt"]
+  );
+  const spki = await subtle.exportKey("spki", keyPair.publicKey);
+  const publicKeyPem = bytesToPemSpki(spki);
 
-const doc = makeTarget({
-  getElementById(id) {
-    return id === "login-button" ? loginBtn : null;
-  },
-  querySelector(sel) {
-    if (sel === ".end-session") return endBtn;
-    if (sel === 'input[name="username"]') return usernameEl;
-    if (sel === 'input[name="password"]') return passwordEl;
-    return null; // "#login-button" falls back to getElementById in the SDK
-  }
-});
-
-const store = {};
-const localStorage = {
-  setItem(k, v) {
-    store[k] = String(v);
-  },
-  getItem(k) {
-    return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null;
-  }
-};
-
-const win = makeTarget({
-  APP_ID: "app-123",
-  TASK_CONFIG: {
-    usernameInput: 'input[name="username"]',
-    passwordInput: 'input[name="password"]',
-    verifyButton: "#login-button",
-    scrollContainer: "#content",
-    endSessionButton: ".end-session",
-    payloadKey: "data"
-  },
-  ACTIONS_LIST: JSON.stringify([
-    [
-      { type: "click", args: { location: { x: 10, y: 20 } } },
-      { type: "input", selector: { name: "username", id: "u_dynamic" }, args: { text: "x" } },
-      { type: "input", selector: { name: "password", id: "p_dynamic" }, args: { text: "y" } }
-    ]
-  ]),
-  localStorage: localStorage,
-  scrollY: 0,
-  innerWidth: 1280,
-  innerHeight: 800,
-  devicePixelRatio: 2
-});
-
-// Environment globals the SDK snapshots into browserInfo. `navigator` and
-// `performance` are read-only globals in modern Node, so define over them.
-let perfClock = 0;
-Object.defineProperty(global, "navigator", {
-  configurable: true,
-  value: {
-    userAgent: "node-test-agent",
-    platform: "linux",
-    language: "en-US",
-    webdriver: false,
-    hardwareConcurrency: 8,
-    plugins: { length: 3 },
-    maxTouchPoints: 0
-  }
-});
-Object.defineProperty(global, "performance", {
-  configurable: true,
-  value: {
-    now() {
-      perfClock += 1;
-      return perfClock;
+  // --- minimal DOM / element shim -----------------------------------------
+  const statusEl = { textContent: "Checking…" };
+  const doc = {
+    getElementById(id) {
+      return id === "status" ? statusEl : null;
     },
-    getEntriesByType(kind) {
-      return kind === "navigation" ? [{ duration: 800 }] : [];
+    createElement() {
+      // Canvas-like: no real 2d/webgl context in the shim.
+      return { width: 0, height: 0, getContext() { return null; }, toDataURL() { return ""; } };
     }
+  };
+
+  const store = {};
+  const localStorage = {
+    setItem(k, v) { store[k] = String(v); },
+    getItem(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; }
+  };
+
+  const fetchCalls = [];
+  function fakeFetch(url, init) {
+    fetchCalls.push({ url, init });
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
   }
-});
-global.screen = { width: 1920, height: 1080 };
 
-// Wire the collector factory onto the fake window, then expose globals so the
-// classic-script SDK (which references bare `window`/`document`) can run.
-win.BVCollector = require(path.join(JS_DIR, "collector.js"));
-global.window = win;
-global.document = doc;
+  const win = {
+    PUBLIC_KEY: publicKeyPem,
+    TASK_CONFIG: { evalUrl: "/_eval", payloadKey: "data", autoSubmit: true },
+    BV_SESSION: {
+      sessionId: "sess-1",
+      nonce: "nonce-abc123",
+      publicKeyId: "pk-deadbeef",
+      configHash: "cfg-1234",
+      schemaVersion: "bv-runtime-1"
+    },
+    crypto: webcrypto,
+    btoa: (s) => Buffer.from(s, "binary").toString("base64"),
+    atob: (s) => Buffer.from(s, "base64").toString("binary"),
+    fetch: fakeFetch,
+    localStorage,
+    location: { href: "https://challenge/_web", origin: "https://challenge" },
+    innerWidth: 1440,
+    innerHeight: 812,
+    outerWidth: 1440,
+    outerHeight: 900,
+    devicePixelRatio: 1
+    // AudioContext / RTCPeerConnection / WebAssembly / indexedDB intentionally absent.
+  };
 
-// Executing the module runs the SDK IIFE against our shim.
-require(path.join(JS_DIR, "sdk.js"));
+  global.window = win;
+  global.document = doc;
+  Object.defineProperty(global, "navigator", {
+    configurable: true,
+    value: {
+      userAgent:
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+      platform: "Linux x86_64",
+      vendor: "Google Inc.",
+      language: "en-US",
+      languages: ["en-US", "en"],
+      webdriver: false,
+      hardwareConcurrency: 8,
+      maxTouchPoints: 0,
+      plugins: { length: 3 },
+      mimeTypes: { length: 2 },
+      userAgentData: { mobile: false, platform: "Linux", brands: [{ brand: "Chromium" }] }
+    }
+  });
+  global.screen = {
+    width: 1920, height: 1080, availWidth: 1920, availHeight: 1040, colorDepth: 24, pixelDepth: 24
+  };
+  Object.defineProperty(global, "performance", {
+    configurable: true,
+    value: { getEntriesByType: (k) => (k === "navigation" ? [{ duration: 800 }] : []) }
+  });
 
-function read() {
-  const raw = localStorage.getItem("data");
-  assert.ok(raw, 'localStorage["data"] must exist');
-  return JSON.parse(raw);
+  // Wire the collector factory, then run the SDK IIFE against the shim.
+  win.BVCollector = require(path.join(JS_DIR, "collector.js"));
+  require(path.join(JS_DIR, "sdk.js"));
+
+  // The IIFE auto-runs on load; await an explicit run for a deterministic result.
+  const submitted = await win.BV_SDK.submitNow();
+
+  // Do all async crypto up front so the assertions below can stay synchronous.
+  const lastBody = JSON.parse(fetchCalls[fetchCalls.length - 1].init.body);
+  const blob = lastBody.error.data;
+  const decoded = await decryptBlob(blob, keyPair.privateKey);
+  const payload = JSON.parse(decoded.plaintext);
+
+  let passed = 0;
+  function test(name, fn) {
+    fn();
+    passed += 1;
+    console.log("  ok - " + name);
+  }
+
+  test("auto-submit resolves true and flips window.BV_SUBMITTED", () => {
+    assert.strictEqual(submitted, true);
+    assert.strictEqual(win.BV_SUBMITTED, true);
+  });
+
+  test("updates #status to 'Verification complete'", () => {
+    assert.strictEqual(statusEl.textContent, "Verification complete");
+  });
+
+  test("POSTs to TASK_CONFIG.evalUrl with the {error:{data}} envelope", () => {
+    const call = fetchCalls[fetchCalls.length - 1];
+    assert.strictEqual(call.url, "/_eval");
+    assert.strictEqual(call.init.method, "POST");
+    assert.ok(typeof blob === "string" && blob.length > 0, "blob must be a string");
+    assert.ok(DATA_REGEX.test(blob), "blob must match the server data charset");
+  });
+
+  test("blob is the hybrid key::iv::text wire format (3 parts)", () => {
+    assert.strictEqual(blob.split("::").length, 3, "expected encKey::encIv::cipherText");
+  });
+
+  test("blob round-trips: RSA-OAEP(key,iv) + AES-256-CBC(text) -> original payload", () => {
+    assert.strictEqual(decoded.rawKey.length, 32, "AES-256 key");
+    assert.strictEqual(decoded.iv.length, 16, "16-byte IV");
+    // Must equal what the SDK stashed locally too.
+    assert.strictEqual(decoded.plaintext, localStorage.getItem("data"));
+  });
+
+  test("collected payload carries the non-behavioral integrity sections", () => {
+    assert.ok(payload.browserInfo, "browserInfo present");
+    assert.strictEqual(payload.browserInfo.webdriver, false);
+    assert.ok(payload.browserInfo.userAgent.indexOf("Chrome") !== -1);
+    for (const k of [
+      "automation", "runtimeIntegrity", "apiAvailability", "fingerprint",
+      "navigator", "display", "correlation", "sessionBinding"
+    ]) {
+      assert.ok(payload[k] && typeof payload[k] === "object", k + " section present");
+    }
+  });
+
+  test("automation indicators reflect a clean (non-automated) shim", () => {
+    assert.strictEqual(payload.automation.webdriver, false);
+    assert.strictEqual(payload.automation.headlesschrome, false);
+  });
+
+  test("apiAvailability reports real capability booleans", () => {
+    assert.strictEqual(payload.apiAvailability.serviceWorker, false); // absent in shim navigator
+    assert.strictEqual(typeof payload.apiAvailability.indexedDb, "boolean");
+  });
+
+  test("sessionBinding echoes the injected BV_SESSION fields", () => {
+    assert.strictEqual(payload.sessionBinding.nonce, "nonce-abc123");
+    assert.strictEqual(payload.sessionBinding.sessionId, "sess-1");
+    assert.strictEqual(payload.sessionBinding.publicKeyId, "pk-deadbeef");
+    assert.strictEqual(payload.sessionBinding.schemaVersion, "bv-runtime-1");
+  });
+
+  test("legacy behavior series are present but EMPTY (no behavior collected)", () => {
+    for (const k of ["movements", "clicks", "mouseDowns", "mouseUps", "keydowns", "keyups", "scroll"]) {
+      assert.deepStrictEqual(payload[k], [], k + " must be empty");
+    }
+  });
+
+  test("NO behavioral fields leak into the payload", () => {
+    const banned = ["eventSequence", "targets", "taskProgress", "trustedEventStats", "buttonHoverToClickTime"];
+    const raw = localStorage.getItem("data");
+    for (const k of banned) {
+      assert.ok(raw.indexOf('"' + k + '"') === -1, "payload must not contain " + k);
+    }
+  });
+
+  test("submission required NO behavioral input (no events were dispatched)", () => {
+    // We never dispatched a mouse/key/scroll event; the SDK submitted anyway.
+    assert.strictEqual(win.BV_SUBMITTED, true);
+  });
+
+  console.log("\nsdk.test.js: " + passed + " passed");
 }
 
-let passed = 0;
-function test(name, fn) {
-  fn();
-  passed += 1;
-  console.log("  ok - " + name);
-}
-
-test('writes localStorage["data"] on load, before any interaction', () => {
-  const d = read();
-  assert.strictEqual(d.appId, "app-123");
-  for (const k of ["movements", "clicks", "keydowns", "keyups", "scroll", "eventSequence", "targets"]) {
-    assert.deepStrictEqual(d[k], []);
-  }
+main().catch((err) => {
+  console.error(err && err.stack ? err.stack : err);
+  process.exitCode = 1;
 });
-
-test("snapshots browserInfo from navigator/screen/window on load", () => {
-  const b = read().browserInfo;
-  assert.ok(b, "browserInfo should be populated");
-  assert.strictEqual(b.userAgent, "node-test-agent");
-  assert.strictEqual(b.webdriver, false);
-  assert.strictEqual(b.hardwareConcurrency, 8);
-  assert.strictEqual(b.pluginsLength, 3);
-  assert.deepStrictEqual(b.viewport, { width: 1280, height: 800 });
-  assert.strictEqual(b.devicePixelRatio, 2);
-});
-
-test("captures pageLoadMs from the navigation timing API", () => {
-  assert.strictEqual(read().pageTimings.pageLoadMs, 800);
-});
-
-test("assigns per-session input ids from ACTIONS_LIST", () => {
-  assert.strictEqual(usernameEl.id, "u_dynamic");
-  assert.strictEqual(passwordEl.id, "p_dynamic");
-});
-
-test("records behavior events into localStorage after interaction", () => {
-  doc.dispatch("mousemove", { clientX: 5, clientY: 6, isTrusted: true });
-  doc.dispatch("mousedown", { clientX: 5, clientY: 6, isTrusted: true });
-  doc.dispatch("mouseup", { clientX: 5, clientY: 6, isTrusted: true });
-  doc.dispatch("pointerdown", { clientX: 5, clientY: 6, isTrusted: true, target: loginBtn });
-  doc.dispatch("pointerup", { clientX: 5, clientY: 6, isTrusted: true });
-  doc.dispatch("click", { clientX: 205, clientY: 419, isTrusted: true, target: loginBtn });
-  doc.dispatch("keydown", { isTrusted: true, key: "a" });
-  doc.dispatch("keyup", { isTrusted: true, key: "a" });
-  win.dispatch("scroll", { isTrusted: true });
-
-  const d = read();
-  assert.strictEqual(d.movements.length, 1);
-  assert.strictEqual(d.mouseDowns.length, 1);
-  assert.strictEqual(d.mouseUps.length, 1);
-  assert.strictEqual(d.clicks.length, 1);
-  assert.strictEqual(d.keydowns.length, 1);
-  assert.strictEqual(d.keyups.length, 1);
-  assert.strictEqual(d.scroll.length, 1);
-});
-
-test("builds an ordered eventSequence with timing + isTrusted", () => {
-  const d = read();
-  assert.ok(d.eventSequence.length >= 5, "sequence should contain the dispatched events");
-  const types = d.eventSequence.map((e) => e.type);
-  for (const t of ["pointerdown", "pointerup", "click", "keydown", "keyup", "scroll"]) {
-    assert.ok(types.includes(t), "eventSequence should include " + t);
-  }
-  const click = d.eventSequence.find((e) => e.type === "click");
-  assert.strictEqual(click.trusted, true);
-  assert.strictEqual(typeof click.t, "number");
-  assert.strictEqual(typeof click.pt, "number");
-});
-
-test("tallies isTrusted counts per event type", () => {
-  doc.dispatch("click", { clientX: 1, clientY: 2, isTrusted: false, target: loginBtn });
-  const stats = read().trustedEventStats.click;
-  assert.ok(stats.trusted >= 1 && stats.untrusted >= 1, "both trusted and synthetic clicks tallied");
-});
-
-test("captures click target geometry (id/class/rect) — never a value", () => {
-  const t = read().targets.find((x) => x.id === "login-button");
-  assert.ok(t, "a target for the login button should be recorded");
-  assert.deepStrictEqual(t.rect, { x: 100, y: 400, w: 200, h: 40 });
-  assert.ok(!("value" in t), "target must not carry a value");
-});
-
-test("eventSequence key events never carry the typed character", () => {
-  const d = read();
-  for (const e of d.eventSequence) {
-    if (e.type === "keydown" || e.type === "keyup") {
-      assert.deepStrictEqual(Object.keys(e).sort(), ["pt", "t", "trusted", "type"]);
-    }
-  }
-});
-
-test("does not persist typed characters for key events", () => {
-  const d = read();
-  assert.deepStrictEqual(Object.keys(d.keydowns[0]), ["t"]);
-});
-
-test("focus + type sets username task-progress flags (intent only)", () => {
-  usernameEl.dispatch("focus", { isTrusted: true });
-  doc.dispatch("keydown", { isTrusted: true, key: "h" });
-  usernameEl.dispatch("blur", { isTrusted: true });
-  const p = read().taskProgress;
-  assert.strictEqual(p.usernameFocused, true);
-  assert.strictEqual(p.usernameTyped, true);
-});
-
-test("focus + type sets password task-progress flags", () => {
-  passwordEl.dispatch("focus", { isTrusted: true });
-  doc.dispatch("keydown", { isTrusted: true, key: "s" });
-  passwordEl.dispatch("blur", { isTrusted: true });
-  const p = read().taskProgress;
-  assert.strictEqual(p.passwordFocused, true);
-  assert.strictEqual(p.passwordTyped, true);
-});
-
-test("scroll / verify / end set their intent flags", () => {
-  win.dispatch("scroll", { isTrusted: true });
-  loginBtn.dispatch("mouseenter", {});
-  loginBtn.dispatch("click", { isTrusted: true });
-  const p1 = read().taskProgress;
-  assert.strictEqual(p1.contentScrolled, true);
-  assert.strictEqual(p1.verifyHovered, true);
-  assert.strictEqual(p1.verifyClicked, true);
-});
-
-test("captures buttonHoverToClickTime on hover-then-click", () => {
-  const d = read();
-  assert.strictEqual(typeof d.buttonHoverToClickTime, "number");
-  assert.ok(d.buttonHoverToClickTime >= 0);
-});
-
-test("finalizes (endedAt set) and flags endClicked on end-session click", () => {
-  assert.strictEqual(read().endedAt, null);
-  endBtn.dispatch("click", { isTrusted: true });
-  const d = read();
-  assert.strictEqual(typeof d.endedAt, "number");
-  assert.strictEqual(d.taskProgress.endClicked, true);
-});
-
-test("CREDENTIAL SAFETY: no typed value appears anywhere in the payload", () => {
-  // We dispatched key events carrying key: "h"/"s"/"a"; none may be persisted.
-  const raw = localStorage.getItem("data");
-  const parsed = JSON.parse(raw);
-  // No event/series entry may carry a `key`, `value`, `text`, or `char` field.
-  const banned = ["key", "value", "text", "char", "code"];
-  (function walk(node) {
-    if (Array.isArray(node)) {
-      node.forEach(walk);
-    } else if (node && typeof node === "object") {
-      for (const k of Object.keys(node)) {
-        assert.ok(banned.indexOf(k) === -1, "payload must not contain field: " + k);
-        walk(node[k]);
-      }
-    }
-  })(parsed);
-});
-
-console.log("\nsdk.test.js: " + passed + " passed");
