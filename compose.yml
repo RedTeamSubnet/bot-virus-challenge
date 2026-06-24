@@ -47,6 +47,11 @@ services:
       TERM: ${TERM:-xterm}
       TZ: ${TZ:-UTC}
       VM_RUNNER_API_PORT: ${VM_RUNNER_API_PORT:-8000}
+      # Hostname the spawned bot container uses to reach the challenge API on
+      # bot-executor-net. Must match the challenge-api service name/alias on
+      # that network (default "challenger-api" does not resolve here).
+      CHALLENGE_VM_HOST: ${CHALLENGE_VM_HOST:-challenge-api}
+      CHALLENGE_VM_PORT: ${CHALLENGE_VM_PORT:-10001}
     env_file:
       - path: .env
         required: false
