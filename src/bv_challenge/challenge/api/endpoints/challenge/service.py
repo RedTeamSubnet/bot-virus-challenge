@@ -2,6 +2,7 @@
 
 import os
 import time
+import hashlib
 import pathlib
 import threading
 from typing import List, Union, Dict, Tuple, Optional
@@ -212,29 +213,67 @@ def score(miner_output: MinerOutput) -> float:
         return _score
 
 
+# Schema version of the non-behavioral browser/runtime integrity payload the
+# SDK emits. Bump when the collected payload shape changes.
+SCHEMA_VERSION = "bv-runtime-1"
+
+
+def _short_digest(*parts: str) -> str:
+    """Stable short hex fingerprint over the given parts (non-secret)."""
+    _hasher = hashlib.sha256()
+    for _part in parts:
+        _hasher.update((_part or "").encode("utf-8"))
+        _hasher.update(b"\x00")
+    return _hasher.hexdigest()[:16]
+
+
 @validate_call(config={"arbitrary_types_allowed": True})
 def get_web(request: Request) -> HTMLResponse:
-    """Get the web interface for the challenge"""
-    _nonce = None
-    if tm.cur_key_pair:
-        _nonce = tm.cur_key_pair.nonce
-    else:
-        _nonce = utils.gen_random_string()
-        logger.warning(
-            "Not initialized key pair, this endpoint is shouldn't be called directly!"
-        )
-    _key_pair: Tuple[str, str] = asymmetric_helper.gen_key_pair(
-        key_size=config.api.security.asymmetric.key_size, as_str=True
+    """Serve the minimal browser-verification page.
+
+    The page only loads the SDK, which collects non-behavioral browser/runtime
+    integrity signals and submits the encrypted payload to ``/_eval``. The
+    backend injects the per-session public key (encryption key material) plus
+    non-secret session-binding fields.
+    """
+    # Serve the CURRENT session's public key so the SDK encrypts with a key
+    # whose private half lives in the run store (store.private_keys) and can
+    # decrypt the /_eval payload. Then advance the claim pointer so the next
+    # session's page load gets the next key. score() pre-claims the first one,
+    # so sequential /_web loads serve session keys 1..N in order.
+    with tm.claim_lock:
+        _cur = tm.cur_key_pair
+        if _cur and _cur.public_key:
+            _nonce = _cur.nonce
+            _public_key = _cur.public_key
+            tm.pop_task()  # advance to the next session for the next /_web load
+        else:
+            _nonce = utils.gen_random_string()
+            _public_key = asymmetric_helper.gen_key_pair(
+                key_size=config.api.security.asymmetric.key_size, as_str=True
+            )[1]
+            logger.warning(
+                "/_web called with no active session key; serving a throwaway key "
+                "(this endpoint shouldn't be called directly outside a run)."
+            )
+
+    _public_key_id = _short_digest(_public_key)
+    _config_hash = _short_digest(
+        SCHEMA_VERSION,
+        str(config.api.security.asymmetric.key_size),
     )
-    _, _public_key = _key_pair
+
     _templates = Jinja2Templates(directory=(_src_dir / "./templates/html"))
     _html_response = _templates.TemplateResponse(
         request=request,
         name="index.html",
         context={
+            "session_id": _nonce,
             "nonce": _nonce,
             "public_key": _public_key,
-            "actions_list": tm.challenges_action_list,
+            "public_key_id": _public_key_id,
+            "config_hash": _config_hash,
+            "schema_version": SCHEMA_VERSION,
         },
     )
     return _html_response

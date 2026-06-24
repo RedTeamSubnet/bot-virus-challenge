@@ -28,11 +28,16 @@ if os.path.exists(_bot_py_path):
         _bot_py_content = _bot_py_file.read()
 
 _dockerfile_path = str(_bot_dir / "Dockerfile")
+# NOTE: The vm-runner strips any ENTRYPOINT/CMD and forces its own:
+#   cd /app && source venv/bin/activate && exec python -u main.py
+# So the submitted Dockerfile MUST create a venv at /app/venv.
 _dockerfile_content = """FROM redteamsubnet61/bv-bot-base:latest
 COPY requirements.txt .
-RUN python3 -m pip install -r requirements.txt
-COPY ./src .
-ENTRYPOINT [ "docker-entrypoint.sh" ]"""
+RUN sudo chown -R seluser:seluser /app && \\
+    python3 -m venv venv && \\
+    . venv/bin/activate && \\
+    python3 -m pip install --no-cache-dir -r requirements.txt
+COPY ./src ."""
 if os.path.exists(_dockerfile_path):
     with open(_dockerfile_path, "r") as _dockerfile_file:
         _dockerfile_content = _dockerfile_file.read()
