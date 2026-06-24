@@ -1,35 +1,18 @@
 # syntax=docker/dockerfile:1
-
+# Reference bot image — two-file contract: this Dockerfile + bot.py.
 FROM redteamsubnet61/bv-bot-base:latest
-
-USER root
 
 WORKDIR /app
 
-ARG DEBIAN_FRONTEND=noninteractive
-ARG APT_PACKAGES=""
+# The base image ships Chrome and a Python venv (/opt/venv) on PATH, but not the
+# Selenium Python client. Install it into that venv as root (the venv's
+# site-packages is not writable by the default seluser).
+USER root
+RUN /opt/venv/bin/python3 -m pip install --no-cache-dir selenium
 
-RUN set -eux; \
-    if [ -n "${APT_PACKAGES:-}" ]; then \
-        apt-get update --fix-missing; \
-        apt-get install -y --no-install-recommends ${APT_PACKAGES}; \
-        rm -rf /var/lib/apt/lists/*; \
-    fi
+COPY bot.py /app/bot.py
 
-COPY requirements.txt /app/requirements.txt
-
-RUN chmod 644 /app/requirements.txt && \
-    ls -lah /app && \
-    ls -lah /app/requirements.txt && \
-    cat /app/requirements.txt
-
-RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    python3 -m pip install --no-cache-dir -r /app/requirements.txt
-
-COPY ./src /app
-
-RUN chown -R seluser:seluser /app
-
+# Drop back to the unprivileged default user to run the bot.
 USER seluser
 
-ENTRYPOINT ["docker-entrypoint.sh"]
+ENTRYPOINT ["python3", "/app/bot.py"]
