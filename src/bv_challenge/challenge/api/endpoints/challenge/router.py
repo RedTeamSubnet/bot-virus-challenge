@@ -1,12 +1,18 @@
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import JSONResponse
+# -*- coding: utf-8 -*-
 
-from api.core.constants import ErrorCodeEnum
-from api.core.exceptions import BaseHTTPException
+from fastapi import APIRouter, Request, HTTPException, Body
+from fastapi.responses import HTMLResponse, JSONResponse
+
+from api.core.responses import BaseResponse
+from api.endpoints.challenge.schemas import (
+    MinerInput,
+    MinerOutput,
+    EvalPayload,
+    RandomValRequest,
+)
+from api.endpoints.challenge import service
 from api.logger import logger
 
-from .schemas import MinerInput, MinerOutput
-from . import service
 
 router = APIRouter(tags=["Challenge"])
 
@@ -14,7 +20,7 @@ router = APIRouter(tags=["Challenge"])
 @router.get(
     "/task",
     summary="Get task",
-    description="This endpoint returns the task for the miner.",
+    description="This endpoint returns the webpage URL for the challenge.",
     response_class=JSONResponse,
     response_model=MinerInput,
 )
@@ -28,14 +34,14 @@ def get_task(request: Request):
         _miner_input = service.get_task()
 
         logger.success(f"[{_request_id}] - Successfully got the task.")
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception(f"[{_request_id}] - Failed to get task!")
-        raise BaseHTTPException(
-            error_enum=ErrorCodeEnum.INTERNAL_SERVER_ERROR,
-            message="Failed to get task!",
+    except Exception as err:
+        if isinstance(err, HTTPException):
+            raise
+
+        logger.error(
+            f"[{_request_id}] - Failed to get task!",
         )
+        raise
 
     return _miner_input
 
@@ -45,29 +51,140 @@ def get_task(request: Request):
     summary="Score",
     description="This endpoint score miner output.",
     response_class=JSONResponse,
-    responses={422: {}},
+    responses={400: {}, 422: {}},
 )
-def post_score(request: Request, miner_input: MinerInput, miner_output: MinerOutput):
+def post_score(
+    request: Request,
+    miner_input: MinerInput,
+    miner_output: MinerOutput,
+):
 
     _request_id = request.state.request_id
-    logger.info(f"[{_request_id}] - Scoring the miner output...")
+    logger.info(f"[{_request_id}] - Evaluating the miner output...")
 
-    _score: float = 0.0
     try:
-        _score = service.score(request_id=_request_id, miner_output=miner_output)
-        logger.success(
-            f"[{_request_id}] - Successfully scored the miner output: {_score}"
-        )
+        _score = service.score(miner_output=miner_output)
     except HTTPException:
+        # Already a well-formed HTTP error (e.g. TOO_MANY_REQUESTS) -- let it
+        # propagate so the client gets the real status, never a 200/null.
+        logger.error(f"[{_request_id}] - Failed to evaluate the miner output!")
         raise
-    except Exception:
-        logger.exception(f"[{_request_id}] - Failed to score the miner output!")
-        raise BaseHTTPException(
-            error_enum=ErrorCodeEnum.INTERNAL_SERVER_ERROR,
-            message="Failed to score the miner output!",
+    except Exception as err:
+        logger.error(
+            f"[{_request_id}] - Unexpected error evaluating the miner output: {err}"
+        )
+        raise HTTPException(
+            status_code=500, detail="Failed to evaluate the miner output."
         )
 
+    logger.success(f"[{_request_id}] - Successfully scored the miner output: {_score}")
     return _score
+
+
+@router.get(
+    "/_web",
+    summary="Serves the webpage",
+    description="This endpoint serves the webpage for the challenge.",
+    response_class=HTMLResponse,
+    responses={429: {}},
+)
+def _get_web(request: Request):
+
+    _request_id = request.state.request_id
+    logger.info(f"[{_request_id}] - Getting webpage...")
+
+    _html_response: HTMLResponse
+    try:
+        _html_response = service.get_web(request=request)
+
+        logger.success(f"[{_request_id}] - Successfully got the webpage.")
+    except Exception as err:
+        if isinstance(err, HTTPException):
+            raise
+
+        logger.error(
+            f"[{_request_id}] - Failed to get the webpage!",
+        )
+        raise
+
+    return _html_response
+
+
+@router.post(
+    "/_random_val",
+    summary="Random value",
+    responses={401: {}, 422: {}, 429: {}},
+)
+def post_random_val(request: Request, payload: RandomValRequest):
+    _request_id = request.state.request_id
+    logger.info(f"[{_request_id}] - Checking random val...")
+
+    random_val = payload.random_val.strip()
+    nonce_val: str
+    try:
+        nonce_val = service.get_random_val(nonce=random_val)
+        logger.success(f"[{_request_id}] - Successfully checked the random val.")
+    except Exception as err:
+        if isinstance(err, HTTPException):
+            raise
+        logger.error(f"[{_request_id}] - Failed to check the random val!")
+        raise
+
+    _response = {"nonce_val": nonce_val}
+    return _response
+
+
+@router.post(
+    "/_eval",
+    summary="Evaluate",
+    description="This endpoint evaluate.",
+    responses={422: {}, 429: {}},
+)
+def _post_eval_bot(
+    request: Request,
+    payload: EvalPayload,
+):
+    _request_id = request.state.request_id
+    logger.info(f"[{_request_id}] - Evaluating the bot...")
+
+    try:
+        # Extract the data from the nested structure
+        data = payload.error.data
+        service.eval_bot(data=data)
+
+        logger.success(f"[{_request_id}] - Successfully evaluated the bot.")
+    except Exception as err:
+        if isinstance(err, HTTPException):
+            raise
+
+        logger.error(
+            f"[{_request_id}] - Failed to evaluate the bot!",
+        )
+        raise
+
+    _response = BaseResponse(request=request, message="Successfully evaluated the bot.")
+    return _response
+
+
+@router.post(
+    "/compare",
+    summary="Compare miner outputs (disabled)",
+    description="Disabled: the comparison backend is not wired into this build.",
+    responses={501: {}},
+)
+def post_compare(
+    request: Request,
+    miner_output: dict = Body(...),
+    reference_output: dict = Body(...),
+    miner_input: dict = Body(...),
+):
+    # Disabled rather than silently returning a misleading 0.0 similarity. Re-enable
+    # by wiring a real comparer into service.compare_outputs and restoring the body.
+    _request_id = request.state.request_id
+    logger.warning(f"[{_request_id}] - /compare is disabled (no comparison backend).")
+    raise HTTPException(
+        status_code=501, detail="Comparison endpoint is not available."
+    )
 
 
 __all__ = ["router"]
