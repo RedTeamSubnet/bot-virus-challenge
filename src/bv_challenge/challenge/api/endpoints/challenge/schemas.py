@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-import pathlib
 from typing import Optional, Union, List, Dict, Any
 
 from pydantic import BaseModel, Field, constr, field_validator
@@ -16,32 +15,20 @@ from api.core.constants import (
 from api.config import config
 from api.core import utils
 
+_api_dir = os.getenv("BV_CHALLENGE_API_DIR", "/app/rest-bv-challenge")
+_bot_dir = os.path.join(_api_dir, "bot")
 
-_src_dir = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
-_bot_dir = _src_dir / "bot"
-_bot_core_dir = _bot_dir / "src" / "core"
-
-_bot_py_path = str(_bot_core_dir / "bot.py")
-_bot_py_content = "def run_bot(driver):\n    print('Hello, World!')"
+_bot_py_content = ""
+_bot_py_path = os.path.join(_bot_dir, "bot.py")
 if os.path.exists(_bot_py_path):
     with open(_bot_py_path, "r") as _bot_py_file:
         _bot_py_content = _bot_py_file.read()
 
-_dockerfile_path = str(_bot_dir / "Dockerfile")
-# NOTE: The vm-runner strips any ENTRYPOINT/CMD and forces its own:
-#   cd /app && source venv/bin/activate && exec python -u main.py
-# So the submitted Dockerfile MUST create a venv at /app/venv.
-_dockerfile_content = """FROM redteamsubnet61/bv-bot-base:latest
-COPY requirements.txt .
-RUN sudo chown -R seluser:seluser /app && \\
-    python3 -m venv venv && \\
-    . venv/bin/activate && \\
-    python3 -m pip install --no-cache-dir -r requirements.txt
-COPY ./src ."""
+_dockerfile_content = ""
+_dockerfile_path = os.path.join(_bot_dir, "Dockerfile")
 if os.path.exists(_dockerfile_path):
     with open(_dockerfile_path, "r") as _dockerfile_file:
         _dockerfile_content = _dockerfile_file.read()
-
 
 
 class KeyPairPM(BaseModel):
@@ -161,8 +148,11 @@ class MinerOutput(BaseModel):
     def _check_dockerfile_lines(cls, val: str) -> str:
         _lines = val.split("\n")
         if len(_lines) > 500:
-            raise ValueError("Dockerfile content is too long, max 500 lines are allowed!")
+            raise ValueError(
+                "Dockerfile content is too long, max 500 lines are allowed!"
+            )
         return val
+
 
 class ErrorData(BaseModel):
     data: str = Field(
@@ -186,13 +176,8 @@ class RandomValRequest(BaseModel):
         pattern=ALPHANUM_REGEX,
         title="Random value",
         description="Random value.",
-        examples=["a1b2c3d4e5f6g7h8"]
+        examples=["a1b2c3d4e5f6g7h8"],
     )
 
-__all__ = [
-    "KeyPairPM",
-    "MinerInput",
-    "MinerOutput",
-    "EvalPayload",
-    "RandomValRequest"
-]
+
+__all__ = ["KeyPairPM", "MinerInput", "MinerOutput", "EvalPayload", "RandomValRequest"]

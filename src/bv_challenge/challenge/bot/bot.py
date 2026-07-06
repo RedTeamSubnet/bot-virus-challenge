@@ -21,23 +21,55 @@ Only the Selenium Python client is required on top of the base image.
 import os
 import sys
 import logging
+import shutil
 import subprocess
 import tempfile
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-
 logger = logging.getLogger(__name__)
 
 _VIEWPORT_WIDTH = 1440
 _VIEWPORT_HEIGHT = 900
 _DEFAULT_PORT = "10001"
+
+
+def first_existing_path(*paths: str) -> str:
+    """Return the first existing executable path from explicit paths or PATH."""
+
+    for path in paths:
+        if not path:
+            continue
+        resolved = shutil.which(path) if "/" not in path else path
+        if resolved and os.path.exists(resolved):
+            return resolved
+    return ""
+
+
+def parse_session_count() -> int:
+    """Read the number of browser sessions requested by the runner."""
+
+    try:
+        session_count = int(os.getenv("BV_SESSION_COUNT", "1"))
+    except (TypeError, ValueError):
+        session_count = 1
+    return max(1, session_count)
+
+
+def session_web_url(web_url: str, session_index: int) -> str:
+    """Return a fresh URL for this session without changing the endpoint."""
+
+    parsed = urlparse(web_url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    # query["bv_session"] = str(session_index + 1)
+    return urlunparse(parsed._replace(query=urlencode(query)))
 
 
 def resolve_web_url() -> str:
@@ -72,10 +104,32 @@ def setup_driver(web_url: str) -> WebDriver:
     """Initialize headless Chrome and load the challenge page."""
 
     _options = webdriver.ChromeOptions()
-    _options.add_argument("--headless")
+    chromium_path = first_existing_path(
+        os.getenv("CHROME_BIN", ""),
+        "chromium",
+        "chromium-browser",
+        "google-chrome",
+    )
+    chromedriver_path = first_existing_path(
+        os.getenv("CHROMEDRIVER_BIN", ""),
+        "chromedriver",
+    )
+
+    if chromium_path:
+        _options.binary_location = chromium_path
+        logger.info(f"Using Chromium binary: {chromium_path}")
+    if not chromedriver_path:
+        raise RuntimeError("chromedriver executable not found in PATH")
+    logger.info(f"Using Chromedriver binary: {chromedriver_path}")
+
+    _options.add_argument("--headless=new")
     _options.add_argument("--no-sandbox")
     _options.add_argument("--disable-gpu")
+    _options.add_argument("--disable-dev-shm-usage")
     _options.add_argument("--ignore-certificate-errors")
+    _options.add_argument("--no-first-run")
+    _options.add_argument("--no-default-browser-check")
+    _options.add_argument("--remote-debugging-port=0")
 
     # Treat the (HTTP) challenge origin as secure so the SDK gets a secure
     # context and WebCrypto SubtleCrypto is available for payload encryption.
@@ -86,7 +140,8 @@ def setup_driver(web_url: str) -> WebDriver:
     _options.add_argument(f"--user-data-dir={tempfile.mkdtemp(prefix='bv-chrome-')}")
     _options.add_argument(f"--window-size={_VIEWPORT_WIDTH},{_VIEWPORT_HEIGHT}")
 
-    driver = webdriver.Chrome(options=_options)
+    service = ChromeService(executable_path=chromedriver_path)
+    driver = webdriver.Chrome(service=service, options=_options)
     driver.get(web_url)
 
     # Ensure the minimal verification page has loaded.
@@ -152,17 +207,22 @@ def main() -> None:
     web_url = resolve_web_url()
     logger.info(f"Challenge web URL: {web_url}")
 
-    try:
-        session_count = int(os.getenv("BV_SESSION_COUNT", "1"))
-    except (TypeError, ValueError):
-        session_count = 1
-    session_count = max(1, session_count)
+    session_count = parse_session_count()
 
     logger.info(f"Running {session_count} session(s)")
 
+    successful_sessions = 0
     for index in range(session_count):
-        logger.info(f"Session {index + 1}/{session_count}")
-        automate(web_url)
+        current_web_url = session_web_url(web_url, index)
+        logger.info(f"Session {index + 1}/{session_count}: {current_web_url}")
+        if automate(current_web_url):
+            successful_sessions += 1
+
+    if successful_sessions != session_count:
+        logger.error(
+            f"Completed {successful_sessions}/{session_count} requested session(s)."
+        )
+        sys.exit(1)
 
     logger.info("Done!\n")
 
