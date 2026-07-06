@@ -4,7 +4,7 @@ challenge:
   docker_ulimit: 32768
   allowed_pip_pkg_dt: "2025-01-01T00:00:00Z"
   allowed_file_exts: [".py", ".json", ".yaml", ".yml", ".txt", ".pt"]
-  bot_timeout: 120
+  bot_timeout: 200
   # Layer 1/2 fallback score policy
   gate_fail_score: 0.0
   metrics_processor_error_score: 0.5
@@ -48,5 +48,5 @@ challenge:
 
   # VM configuration for remote Docker build/run
   vm_endpoint: "http://bot-runner:8000"
-  vm_timeout: 120
+  vm_timeout: 200
   vm_ssl_verify: false
