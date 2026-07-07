@@ -317,7 +317,7 @@ def get_random_val(nonce: str) -> str:
 
 
 def _score_payload(plain_data: dict) -> float:
-    """Layer 1 gate then Layer 2 scorer for one decrypted payload.
+    """Validate shape then run the scorer for one decrypted payload.
 
     Never raises: any unexpected error falls back to the configured error score
     so ``eval_bot`` can always record a result for an attributed session.
@@ -326,10 +326,6 @@ def _score_payload(plain_data: dict) -> float:
         _shape_ok, _shape_reason = scoring.validate_shape(plain_data)
         if not _shape_ok:
             logger.info(f"Layer 1 shape check rejected session: {_shape_reason}")
-            return config.challenge.gate_fail_score
-        _passed, _reason = scoring.passes_gate(plain_data)
-        if not _passed:
-            logger.info(f"Layer 1 gate rejected session: {_reason}")
             return config.challenge.gate_fail_score
         return scoring.score_with_metrics_processor(
             data=plain_data,

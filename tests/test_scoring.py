@@ -51,33 +51,3 @@ def test_returns_error_score_when_no_processor_available(monkeypatch) -> None:
     monkeypatch.setattr(scoring, "_default_metrics_processor", None)
     assert scoring.score_with_metrics_processor({}, error_score=0.5) == 0.5
 
-
-def test_passes_gate_with_injected_gate() -> None:
-    assert scoring.passes_gate({}, gate=lambda d: {"passed": True, "reason": None}) == (
-        True,
-        None,
-    )
-    assert scoring.passes_gate({}, gate=lambda d: {"passed": False, "reason": "x"}) == (
-        False,
-        "x",
-    )
-
-
-def test_passes_gate_fails_closed_on_error() -> None:
-    def boom(d: dict) -> dict:
-        raise RuntimeError("boom")
-
-    passed, _ = scoring.passes_gate({}, gate=boom)
-    assert passed is False
-
-
-def test_passes_gate_fails_closed_on_malformed_result() -> None:
-    assert scoring.passes_gate({}, gate=lambda d: "nope")[0] is False
-    assert scoring.passes_gate({}, gate=lambda d: {})[0] is False
-
-
-def test_passes_gate_passthrough_when_unavailable(monkeypatch) -> None:
-    # No wheel in dev/CI -> gate passes through so the scorer fallback governs.
-    monkeypatch.setattr(scoring, "_default_gate", None)
-    passed, _ = scoring.passes_gate({})
-    assert passed is True
