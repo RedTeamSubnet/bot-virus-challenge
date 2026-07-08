@@ -1,27 +1,16 @@
 # -*- coding: utf-8 -*-
 
-import os
-import re
-import time
-import shutil
+
 import random
 import requests
-import subprocess
-from datetime import datetime, timezone
-from typing import List, Dict, Union, Tuple, Optional
+from typing import List, Dict, Union, Tuple
 
 import vault_unlock
-from api.config import config
-import docker
-from docker.models.networks import Network
-from docker import DockerClient
 from pydantic import validate_call
 
-from api.core.constants import ErrorCodeEnum, ENV_PREFIX
 from api.core import utils
-from api.core.exceptions import BaseHTTPException
 from api.helpers.crypto import asymmetric as asymmetric_helper
-from api.endpoints.challenge.schemas import KeyPairPM, MinerOutput
+from api.endpoints.challenge.schemas import KeyPairPM
 from api.logger import logger
 
 
@@ -41,6 +30,7 @@ def gen_key_pairs(n_challenge: int, key_size: int) -> List[KeyPairPM]:
         _key_pairs.append(_key_pair_pm)
 
     return _key_pairs
+
 
 @validate_call
 def gen_cb_actions(
@@ -130,6 +120,7 @@ def gen_cb_actions(
         _challenge_list.append(_action_list)
 
     return _challenge_list
+
 
 @validate_call
 def decrypt(ciphertext: str, private_key: str) -> str:

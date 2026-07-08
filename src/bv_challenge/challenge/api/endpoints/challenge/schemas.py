@@ -1,15 +1,13 @@
 # -*- coding: utf-8 -*-
 
 import os
-from typing import Optional, Union, List, Dict, Any
+from typing import Optional, Union
 
 from pydantic import BaseModel, Field, constr, field_validator
 
 from api.core.constants import (
     ALPHANUM_REGEX,
     ALPHANUM_HOST_REGEX,
-    ALPHANUM_EXTEND_REGEX,
-    REQUIREMENTS_REGEX,
     ALPHANUM_CUSTOM_REGEX,
 )
 from api.config import config

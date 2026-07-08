@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import os
 import time
 import hashlib
 import pathlib
@@ -11,12 +10,6 @@ from pydantic import validate_call
 from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-# from rt_comparer import RTComparer
-
-# try:
-#     from modules.rt_bv_score import MetricsProcessor  # type: ignore
-# except ImportError:
-#     from rt_bv_score import MetricsProcessor  # type: ignore
 
 from api.core.constants import ErrorCodeEnum
 from api.core import utils
@@ -29,7 +22,6 @@ from api.endpoints.challenge import scoring
 from api.endpoints.challenge import eval_runner
 from api.endpoints.challenge.session_store import RunStore
 from api.logger import logger
-
 
 _src_dir = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
 
