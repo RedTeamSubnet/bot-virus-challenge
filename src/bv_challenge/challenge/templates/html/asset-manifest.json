@@ -1,11 +1,13 @@
 {
   "files": {
-    "collector.js": "/static/js/collector.js",
-    "sdk.js": "/static/js/sdk.js",
+    "main.css": "/static/css/main.4e0cb29c.css",
+    "main.js": "/static/js/main.4c3a50a8.js",
+    "static/js/221.e8bf0ff9.chunk.js": "/static/js/221.e8bf0ff9.chunk.js",
+    "static/js/810.ac12fa61.chunk.js": "/static/js/810.ac12fa61.chunk.js",
     "index.html": "/index.html"
   },
   "entrypoints": [
-    "static/js/collector.js",
-    "static/js/sdk.js"
+    "static/css/main.4e0cb29c.css",
+    "static/js/main.4c3a50a8.js"
   ]
 }
