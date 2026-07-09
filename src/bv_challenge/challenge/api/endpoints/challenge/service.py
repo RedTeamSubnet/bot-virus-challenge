@@ -119,6 +119,37 @@ class TaskManager:
 global tm
 tm = TaskManager()
 
+_latest_result_lock = threading.Lock()
+_latest_result: Dict[str, Union[float, str, bool, None]] = {
+    "score": None,
+    "feedback": "",
+    "phase": "not_started",
+    "simple_bot_passed": None,
+}
+
+
+def _set_latest_result(
+    *,
+    score: float,
+    feedback: str,
+    phase: str,
+    simple_bot_passed: bool | None,
+) -> None:
+    with _latest_result_lock:
+        _latest_result.update(
+            {
+                "score": score,
+                "feedback": feedback,
+                "phase": phase,
+                "simple_bot_passed": simple_bot_passed,
+            }
+        )
+
+
+def get_result() -> Dict[str, Union[float, str, bool, None]]:
+    with _latest_result_lock:
+        return dict(_latest_result)
+
 
 def get_task() -> MinerInput:
     """Get the task for the miner"""
@@ -139,6 +170,52 @@ def score(miner_output: MinerOutput) -> float:
     _num_tasks = config.challenge.n_ch_per_epoch * _expected
 
     with tm.run_lock:
+        try:
+            ch_utils.send_build_request(
+                vm_endpoint=config.challenge.vm_endpoint,
+                bot_py=miner_output.bot_py,
+                dockerfile=miner_output.dockerfile,
+                timeout=config.challenge.vm_timeout,
+                ssl_verify=config.challenge.vm_ssl_verify,
+                score_job_id=miner_output.score_job_id,
+            )
+        except Exception as err:
+            logger.error(f"Failed to build miner container: {err}")
+            _set_latest_result(
+                score=0.0,
+                feedback="failed to build miner container",
+                phase="build",
+                simple_bot_passed=None,
+            )
+            return 0.0
+
+        try:
+            _simple_result = ch_utils.send_run_simple_bot_request(
+                vm_endpoint=config.challenge.vm_endpoint,
+                timeout=config.challenge.vm_timeout,
+                ssl_verify=config.challenge.vm_ssl_verify,
+                score_job_id=miner_output.score_job_id,
+            )
+        except Exception as err:
+            logger.error(f"Simple bot detection phase failed: {err}")
+            _set_latest_result(
+                score=0.0,
+                feedback="failed in simple bot detection phase",
+                phase="simple_bot",
+                simple_bot_passed=False,
+            )
+            return 0.0
+
+        if _simple_result.get("passed") is not True:
+            logger.info(f"Simple bot detection rejected miner: {_simple_result}")
+            _set_latest_result(
+                score=0.0,
+                feedback="failed in simple bot detection phase",
+                phase="simple_bot",
+                simple_bot_passed=False,
+            )
+            return 0.0
+
         # Start a fresh run if the previous one is exhausted.
         if (not tm.has_remaining_tasks()) or (
             tm.get_remaining_task_count() < _num_tasks
@@ -154,17 +231,17 @@ def score(miner_output: MinerOutput) -> float:
         if not task:
             raise BaseHTTPException(
                 error_enum=ErrorCodeEnum.TOO_MANY_REQUESTS,
-                message="No initialized key pairs or action lists, or out of tasks!",
+                message="No initialized key pairs, or out of tasks!",
             )
+
+        _runner_failed = False
 
         def _start_runner() -> None:
             logger.info(
                 f"[run {_run_id}] Starting {_expected} bot session(s) via runner..."
             )
-            ch_utils.send_build_and_run_request(
+            ch_utils.send_run_web_request(
                 vm_endpoint=config.challenge.vm_endpoint,
-                bot_py=miner_output.bot_py,
-                dockerfile=miner_output.dockerfile,
                 session_count=_expected,
                 timeout=config.challenge.vm_timeout,
                 ssl_verify=config.challenge.vm_ssl_verify,
@@ -186,6 +263,8 @@ def score(miner_output: MinerOutput) -> float:
                 _i += 1
 
         def _on_runner_error(err: Exception) -> None:
+            nonlocal _runner_failed
+            _runner_failed = True
             logger.error(
                 f"[run {_run_id}] Runner failed: {err}; returning runner_fail_score."
             )
@@ -201,6 +280,16 @@ def score(miner_output: MinerOutput) -> float:
         )
         logger.info(
             f"[run {_run_id}] Final score (avg over {_expected} sessions): {_score}"
+        )
+        _set_latest_result(
+            score=float(_score),
+            feedback=(
+                "failed in web scoring phase"
+                if _runner_failed
+                else "web scoring completed"
+            ),
+            phase="web",
+            simple_bot_passed=True,
         )
         return _score
 

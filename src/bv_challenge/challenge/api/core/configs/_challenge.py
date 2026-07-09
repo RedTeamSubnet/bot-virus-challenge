@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from datetime import datetime
-from typing import List, Optional, Dict, Union
+from typing import List
 
 from pydantic import Field, constr
 from pydantic_settings import SettingsConfigDict

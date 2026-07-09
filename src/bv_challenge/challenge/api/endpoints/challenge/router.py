@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from fastapi import APIRouter, Request, HTTPException, Body
+from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from api.core.responses import BaseResponse
@@ -12,7 +12,6 @@ from api.endpoints.challenge.schemas import (
 )
 from api.endpoints.challenge import service
 from api.logger import logger
-
 
 router = APIRouter(tags=["Challenge"])
 
@@ -79,6 +78,18 @@ def post_score(
 
     logger.success(f"[{_request_id}] - Successfully scored the miner output: {_score}")
     return _score
+
+
+@router.get(
+    "/result",
+    summary="Latest scoring result",
+    description="Returns the latest global score feedback result.",
+    response_class=JSONResponse,
+)
+def get_result(request: Request):
+    _request_id = request.state.request_id
+    logger.info(f"[{_request_id}] - Getting latest scoring result...")
+    return service.get_result()
 
 
 @router.get(

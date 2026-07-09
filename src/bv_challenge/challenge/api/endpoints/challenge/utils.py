@@ -199,8 +199,90 @@ def send_build_and_run_request(
         raise
 
 
+@validate_call
+def send_build_request(
+    vm_endpoint: str,
+    bot_py: str,
+    dockerfile: str,
+    timeout: int = 120,
+    ssl_verify: bool = True,
+    score_job_id: str = "",
+) -> Dict:
+    return _post_vm_request(
+        vm_endpoint=vm_endpoint,
+        path="/build",
+        payload={
+            "bot_py": bot_py,
+            "dockerfile": dockerfile,
+            "score_job_id": score_job_id,
+        },
+        timeout=timeout,
+        ssl_verify=ssl_verify,
+    )
+
+
+@validate_call
+def send_run_simple_bot_request(
+    vm_endpoint: str,
+    timeout: int = 120,
+    ssl_verify: bool = True,
+    score_job_id: str = "",
+) -> Dict:
+    return _post_vm_request(
+        vm_endpoint=vm_endpoint,
+        path="/run-simple-bot",
+        payload={"score_job_id": score_job_id, "timeout_sec": timeout},
+        timeout=timeout,
+        ssl_verify=ssl_verify,
+    )
+
+
+@validate_call
+def send_run_web_request(
+    vm_endpoint: str,
+    session_count: int,
+    timeout: int = 120,
+    ssl_verify: bool = True,
+    score_job_id: str = "",
+) -> Dict:
+    return _post_vm_request(
+        vm_endpoint=vm_endpoint,
+        path="/run-web",
+        payload={"session_count": session_count, "score_job_id": score_job_id},
+        timeout=timeout,
+        ssl_verify=ssl_verify,
+    )
+
+
+@validate_call
+def send_build_and_run_request(
+    vm_endpoint: str,
+    bot_py: str,
+    dockerfile: str,
+    session_count: int,
+    timeout: int = 120,
+    ssl_verify: bool = True,
+    score_job_id: str = "",
+) -> Dict:
+    return _post_vm_request(
+        vm_endpoint=vm_endpoint,
+        path="/build_and_run",
+        payload={
+            "bot_py": bot_py,
+            "dockerfile": dockerfile,
+            "session_count": session_count,
+            "score_job_id": score_job_id,
+        },
+        timeout=timeout,
+        ssl_verify=ssl_verify,
+    )
+
+
 __all__ = [
     "gen_key_pairs",
     "decrypt",
+    "send_build_request",
+    "send_run_simple_bot_request",
+    "send_run_web_request",
     "send_build_and_run_request",
 ]
