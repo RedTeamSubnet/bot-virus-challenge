@@ -28,7 +28,7 @@ _src_dir = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
 
 class TaskManager:
     """
-    Task Manager for handling key pairs, action lists, and evaluation metrics
+    Task Manager for handling key pairs and evaluation metrics
     during challenge sessions.
     """
 
@@ -45,26 +45,12 @@ class TaskManager:
         self.reset_tasks()
 
     def reset_tasks(self) -> None:
-        """Reset all tasks: regenerate key pairs, action lists, and run store."""
-        self._actions_idx = 0
+        """Reset all tasks: regenerate key pairs and run store."""
 
         # Generate key pairs (one per session)
         self.key_pairs = ch_utils.gen_key_pairs(
             n_challenge=config.challenge.n_run_per_ch,
             key_size=config.api.security.asymmetric.key_size,
-        )
-
-        # Generate challenge actions
-        self.challenges_action_list = ch_utils.gen_cb_actions(
-            n_challenge=config.challenge.n_ch_per_epoch,
-            window_width=config.challenge.window_width,
-            window_height=config.challenge.window_height,
-            n_checkboxes=config.challenge.n_checkboxes,
-            min_distance=config.challenge.cb_min_distance,
-            max_factor=config.challenge.cb_gen_max_factor,
-            checkbox_size=config.challenge.cb_size,
-            exclude_areas=config.challenge.cb_exclude_areas,
-            pre_action_list=config.challenge.cb_pre_action_list,
         )
 
         # Build the run store. session_id = per-session nonce. Capture private
@@ -461,23 +447,11 @@ def eval_bot(data: str) -> None:
     return
 
 
-def compare_outputs(miner_input, miner_output, reference_output) -> dict:
-    """Disabled: the RTComparer backend is not wired into this build.
-
-    The previous implementation never actually invoked a comparer (it built a
-    string literal and then called ``.get`` on it), so every call silently
-    returned ``similarity_score: 0.0``. Until a real comparer is integrated this
-    raises so the caller surfaces an honest "not implemented" instead of a
-    misleading zero score.
-    """
-    raise NotImplementedError("compare_outputs is not available in this build")
-
-
 __all__ = [
     "get_task",
     "get_web",
     "get_random_val",
     "score",
+    "get_result",
     "eval_bot",
-    "compare_outputs",
 ]

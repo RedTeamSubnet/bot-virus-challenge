@@ -177,25 +177,4 @@ def _post_eval_bot(
     return _response
 
 
-@router.post(
-    "/compare",
-    summary="Compare miner outputs (disabled)",
-    description="Disabled: the comparison backend is not wired into this build.",
-    responses={501: {}},
-)
-def post_compare(
-    request: Request,
-    miner_output: dict = Body(...),
-    reference_output: dict = Body(...),
-    miner_input: dict = Body(...),
-):
-    # Disabled rather than silently returning a misleading 0.0 similarity. Re-enable
-    # by wiring a real comparer into service.compare_outputs and restoring the body.
-    _request_id = request.state.request_id
-    logger.warning(f"[{_request_id}] - /compare is disabled (no comparison backend).")
-    raise HTTPException(
-        status_code=501, detail="Comparison endpoint is not available."
-    )
-
-
 __all__ = ["router"]

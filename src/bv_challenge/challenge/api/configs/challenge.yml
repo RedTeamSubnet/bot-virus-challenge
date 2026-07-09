@@ -10,42 +10,6 @@ challenge:
   metrics_processor_error_score: 0.5
   session_timeout_score: 0.0
   runner_fail_score: 0.0
-  window_width: 1420
-  window_height: 740
-  n_checkboxes: 5
-  cb_min_distance: 300
-  cb_gen_max_factor: 20
-  cb_size: 50
-  cb_exclude_areas: [{ "x1": 500, "y1": 400, "x2": 950, "y2": 700 }]
-  cb_pre_action_list:
-      [
-        {
-          "id": 0,
-          "type": "click",
-          "args": { "location": { "x": 510, "y": 58 } },
-        },
-        {
-          "id": 1,
-          "type": "click",
-          "args": { "location": { "x": 1079, "y": 92 } },
-        },
-        {
-          "id": 2,
-          "type": "click",
-          "args": { "location": { "x": 288, "y": 449 } },
-        },
-        {
-          "id": 3,
-          "type": "click",
-          "args": { "location": { "x": 909, "y": 350 } },
-        },
-        {
-          "id": 4,
-          "type": "click",
-          "args": { "location": { "x": 1314, "y": 289 } },
-        },
-      ]
-
   # VM configuration for remote Docker build/run
   vm_endpoint: "http://bot-runner:8000"
   vm_timeout: 200

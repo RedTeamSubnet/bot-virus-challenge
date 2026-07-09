@@ -29,16 +29,6 @@ class ChallengeConfig(FrozenBaseConfig):
     metrics_processor_error_score: float = Field(default=0.5, ge=0.0, le=1.0)
     session_timeout_score: float = Field(default=0.0, ge=0.0, le=1.0)
     runner_fail_score: float = Field(default=0.0, ge=0.0, le=1.0)
-    window_width: int = Field(..., ge=20, le=12000)
-    window_height: int = Field(..., ge=20, le=12000)
-    n_checkboxes: int = Field(..., ge=2, le=100)
-    cb_min_distance: int = Field(..., ge=1, le=1000)
-    cb_gen_max_factor: int = Field(..., ge=2, le=100)
-    cb_size: int = Field(..., ge=10, le=100)
-    cb_exclude_areas: Optional[List[Dict[str, int]]] = Field(default=None)
-    cb_pre_action_list: Optional[
-        List[Dict[str, Union[int, str, Dict[str, Dict[str, int]]]]]
-    ] = Field(default=None)
     # VM configuration for remote Docker build/run
     vm_endpoint: str = Field(...)
     vm_timeout: int = Field(default=120, ge=1)
