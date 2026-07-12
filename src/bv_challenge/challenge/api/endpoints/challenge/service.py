@@ -20,7 +20,6 @@ from api.endpoints.challenge.payload_manager import PayloadManager
 from api.endpoints.challenge.schemas import MinerInput, MinerOutput
 from api.logger import logger
 
-
 _SRC_DIR = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
 payload_manager = PayloadManager()
 _latest_result_lock = threading.Lock()
@@ -123,12 +122,14 @@ def score(miner_output: MinerOutput) -> float:
         final_score = payload_manager.finalize(
             timeout_score=config.challenge.session_timeout_score
         )
-        logger.info(
-            f"[run {payload_manager.run_id}] Final score: {final_score}"
-        )
+        logger.info(f"[run {payload_manager.run_id}] Final score: {final_score}")
         _set_latest_result(
             score=float(final_score),
-            feedback="failed in web scoring phase" if runner_failed else "web scoring completed",
+            feedback=(
+                "failed in web scoring phase"
+                if runner_failed
+                else "web scoring completed"
+            ),
             phase="web",
             simple_bot_passed=True,
         )
