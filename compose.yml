@@ -42,9 +42,6 @@ services:
       VM_RUNNER_API_PORT: ${VM_RUNNER_API_PORT:-8000}
       DOCKER_HOST: unix:///docker-socket/docker.sock
       CHALLENGE_HTTPS_PROXY_PORT: ${CHALLENGE_HTTPS_PROXY_PORT:-10443}
-      SIMPLE_BOT_PUBLIC_URL: ${SIMPLE_BOT_PUBLIC_URL:-https://simplebot.theredteam.io}
-      SIMPLE_BOT_POLL_MAX_ATTEMPTS: ${SIMPLE_BOT_POLL_MAX_ATTEMPTS:-5}
-      SIMPLE_BOT_POLL_INTERVAL_SEC: ${SIMPLE_BOT_POLL_INTERVAL_SEC:-2}
     env_file:
       - path: .env
         required: false
