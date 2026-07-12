@@ -41,9 +41,10 @@ services:
       TZ: ${TZ:-UTC}
       VM_RUNNER_API_PORT: ${VM_RUNNER_API_PORT:-8000}
       DOCKER_HOST: unix:///docker-socket/docker.sock
-      CHALLENGE_PROXY_PORT: ${CHALLENGE_PROXY_PORT:-10001}
-      SIMPLE_BOT_FRONTEND_PROXY_PORT: ${SIMPLE_BOT_FRONTEND_PROXY_PORT:-5173}
-      SIMPLE_BOT_BACKEND_PROXY_PORT: ${SIMPLE_BOT_BACKEND_PROXY_PORT:-4000}
+      CHALLENGE_HTTPS_PROXY_PORT: ${CHALLENGE_HTTPS_PROXY_PORT:-10443}
+      SIMPLE_BOT_PUBLIC_URL: ${SIMPLE_BOT_PUBLIC_URL:-https://simplebot.theredteam.io}
+      SIMPLE_BOT_POLL_MAX_ATTEMPTS: ${SIMPLE_BOT_POLL_MAX_ATTEMPTS:-5}
+      SIMPLE_BOT_POLL_INTERVAL_SEC: ${SIMPLE_BOT_POLL_INTERVAL_SEC:-2}
     env_file:
       - path: .env
         required: false
@@ -67,56 +68,12 @@ services:
     privileged: true
     environment:
       DOCKER_TLS_CERTDIR: ""
-      CHALLENGE_PROXY_PORT: ${CHALLENGE_PROXY_PORT:-10001}
       CHALLENGE_PROXY_TARGET_HOST: ${CHALLENGE_PROXY_TARGET_HOST:-challenge-api}
       CHALLENGE_PROXY_TARGET_PORT: ${CHALLENGE_PROXY_TARGET_PORT:-10001}
-      SIMPLE_BOT_FRONTEND_PROXY_PORT: ${SIMPLE_BOT_FRONTEND_PROXY_PORT:-5173}
-      SIMPLE_BOT_FRONTEND_PROXY_TARGET_HOST: ${SIMPLE_BOT_FRONTEND_PROXY_TARGET_HOST:-simple-bot-frontend}
-      SIMPLE_BOT_FRONTEND_PROXY_TARGET_PORT: ${SIMPLE_BOT_FRONTEND_PROXY_TARGET_PORT:-80}
-      SIMPLE_BOT_BACKEND_PROXY_PORT: ${SIMPLE_BOT_BACKEND_PROXY_PORT:-4000}
-      SIMPLE_BOT_BACKEND_PROXY_TARGET_HOST: ${SIMPLE_BOT_BACKEND_PROXY_TARGET_HOST:-simple-bot-backend}
-      SIMPLE_BOT_BACKEND_PROXY_TARGET_PORT: ${SIMPLE_BOT_BACKEND_PROXY_TARGET_PORT:-4000}
+      CHALLENGE_HTTPS_PROXY_PORT: ${CHALLENGE_HTTPS_PROXY_PORT:-10443}
     volumes:
       - "bot-runner-dind-socket:/docker-socket"
       - "bot-runner-dind-data:/var/lib/docker"
-    tty: true
-
-  simple-bot-backend:
-    image: redteamsubnet61/simple-bot-backend:latest
-    build:
-      context: ./src/modules/iw-bot-detection/backend
-    restart: unless-stopped
-    networks:
-      - bot-virus-challenge-net
-      - bot-executor-net
-    environment:
-      PORT: ${SIMPLE_BOT_BACKEND_PORT:-4000}
-      FRONTEND_ORIGIN: ${SIMPLE_BOT_FRONTEND_ORIGIN:-http://localhost:5173}
-      GOOGLE_APPLICATION_CREDENTIALS: ${SIMPLE_BOT_GOOGLE_APPLICATION_CREDENTIALS:-/app/key/service-account.json}
-      BQ_PROJECT_ID: ${SIMPLE_BOT_BQ_PROJECT_ID:-innerworks-qa}
-      BQ_DATASET: ${SIMPLE_BOT_BQ_DATASET:-qa_innerworks_userdata}
-      BQ_TABLE: ${SIMPLE_BOT_BQ_TABLE:-dev_inference_result}
-    env_file:
-      - path: .env
-        required: false
-    volumes:
-      - "./volumes/configs/simple-bot-backend/key:/app/key:ro"
-    ports:
-      - "${SIMPLE_BOT_BACKEND_PUBLIC_PORT:-4000}:${SIMPLE_BOT_BACKEND_PORT:-4000}"
-    tty: true
-
-  simple-bot-frontend:
-    image: redteamsubnet61/simple-bot-frontend:latest
-    build:
-      context: ./src/modules/iw-bot-detection/frontend
-      args:
-        VITE_BACKEND_URL: ${SIMPLE_BOT_BROWSER_BACKEND_URL:-http://localhost:4000}
-    restart: unless-stopped
-    networks:
-      - bot-virus-challenge-net
-      - bot-executor-net
-    ports:
-      - "${SIMPLE_BOT_FRONTEND_PUBLIC_PORT:-5173}:80"
     tty: true
 
 networks:
