@@ -1,11 +1,34 @@
 # -*- coding: utf-8 -*-
 
+import os
+from pathlib import Path
 from typing import Optional, Union
 
 from pydantic import BaseModel, Field, constr, field_validator
 
 from api.core import utils
 from api.core.constants import ALPHANUM_CUSTOM_REGEX, ALPHANUM_REGEX
+
+MAX_EVAL_PAYLOAD_LENGTH = 128 * 1024
+
+
+_BOT_DIR = Path(
+    os.getenv(
+        "BV_CHALLENGE_API_DIR",
+        str(Path(__file__).resolve().parents[3]),
+    )
+) / "bot"
+
+
+def _read_example(file_name: str) -> str:
+    try:
+        return (_BOT_DIR / file_name).read_text()
+    except OSError:
+        return ""
+
+
+_BOT_PY_EXAMPLE = _read_example("bot.py")
+_DOCKERFILE_EXAMPLE = _read_example("Dockerfile")
 
 
 class KeyPairPM(BaseModel):
@@ -27,13 +50,13 @@ class CommitFilePM(BaseModel):
         ...,
         title="File Name",
         description="Miner file name.",
-        examples=["bot.py"],
+        examples=["bot.py", "Dockerfile"],
     )
     content: constr(strip_whitespace=True, min_length=2) = Field(  # type: ignore
         ...,
         title="File Content",
         description="Content of the file as a string.",
-        examples=["print('hello')"],
+        examples=[_BOT_PY_EXAMPLE, _DOCKERFILE_EXAMPLE],
     )
 
     @field_validator("file_name")
@@ -68,6 +91,21 @@ class MinerOutput(BaseModel):
         title="Commit Files",
         description="Exactly bot.py and Dockerfile.",
     )
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "commit_files": [
+                        {"file_name": "bot.py", "content": _BOT_PY_EXAMPLE},
+                        {
+                            "file_name": "Dockerfile",
+                            "content": _DOCKERFILE_EXAMPLE,
+                        },
+                    ]
+                }
+            ]
+        }
+    }
 
     @field_validator("commit_files", mode="after")
     @classmethod
@@ -91,7 +129,7 @@ class ErrorData(BaseModel):
     data: str = Field(
         ...,
         min_length=2,
-        max_length=64,
+        max_length=MAX_EVAL_PAYLOAD_LENGTH,
         pattern=ALPHANUM_CUSTOM_REGEX,
         title="Bot Data",
         description="Bot data to evaluate.",
