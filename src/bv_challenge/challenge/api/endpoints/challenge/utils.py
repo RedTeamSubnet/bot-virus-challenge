@@ -1,151 +1,119 @@
 # -*- coding: utf-8 -*-
 
-from typing import Dict, List, Tuple
+import time
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 import requests
 import vault_unlock
 from pydantic import validate_call
 
+from api.config import config
 from api.core import utils
 from api.endpoints.challenge.schemas import KeyPairPM
 from api.helpers.crypto import asymmetric as asymmetric_helper
 from api.logger import logger
 
-
-@validate_call
-def gen_key_pairs(n_challenge: int, key_size: int) -> List[KeyPairPM]:
-    _key_pairs: List[KeyPairPM] = []
-    for _ in range(n_challenge):
-        _key_pair: Tuple[str, str] = asymmetric_helper.gen_key_pair(
-            key_size=key_size, as_str=True
-        )
-        _private_key, _public_key = _key_pair
-        _nonce = utils.gen_random_string(length=32)
-        _key_pairs.append(
-            KeyPairPM(private_key=_private_key, public_key=_public_key, nonce=_nonce)
-        )
-    return _key_pairs
+if TYPE_CHECKING:
+    from api.endpoints.challenge.payload_manager import PayloadManager
 
 
 @validate_call
+def gen_key_pairs() -> List[KeyPairPM]:
+    pairs: List[KeyPairPM] = []
+    for _ in range(config.challenge.n_run_per_ch):
+        private_key, public_key = asymmetric_helper.gen_key_pair(
+            key_size=config.api.security.asymmetric.key_size,
+            as_str=True,
+        )
+        pairs.append(
+            KeyPairPM(
+                private_key=private_key,
+                public_key=public_key,
+                nonce=utils.gen_random_string(length=32),
+            )
+        )
+    return pairs
+
+
 def decrypt(ciphertext: str, private_key: str) -> str:
     return vault_unlock.decrypt_payload(
-        encrypted_text=ciphertext, private_key_pem=private_key
+        encrypted_text=ciphertext,
+        private_key_pem=private_key,
     )
 
 
-def _post_vm_request(
-    vm_endpoint: str,
-    path: str,
-    payload: Dict,
-    timeout: int = 120,
-    ssl_verify: bool = True,
-) -> Dict:
+def _post_vm_request(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    vm_endpoint = config.challenge.vm_endpoint.rstrip("/")
+    timeout = config.challenge.vm_timeout
     logger.info(f"Sending VM request to {vm_endpoint}{path}")
     try:
-        _response = requests.post(
+        response = requests.post(
             f"{vm_endpoint}{path}",
             json=payload,
             timeout=timeout,
-            verify=ssl_verify,
+            verify=config.challenge.vm_ssl_verify,
         )
-        if _response.status_code != 200:
-            logger.error(
-                f"VM request failed with status {_response.status_code}: {_response.text}"
-            )
+        if response.status_code != 200:
             raise ValueError(
-                f"VM request failed with status {_response.status_code}: {_response.text}"
+                f"VM request failed with status {response.status_code}: {response.text}"
             )
         logger.success("Successfully received response from VM")
-        return _response.json()
+        return response.json()
     except requests.Timeout:
         logger.error(f"VM request timed out after {timeout} seconds")
         raise
     except requests.RequestException as err:
-        logger.error(f"VM request failed: {str(err)}")
-        raise
-    except Exception as err:
-        logger.error(f"Unexpected error during VM request: {str(err)}")
+        logger.error(f"VM request failed: {err}")
         raise
 
 
-@validate_call
-def send_build_request(
-    vm_endpoint: str,
-    bot_py: str,
-    dockerfile: str,
-    timeout: int = 120,
-    ssl_verify: bool = True,
-    score_job_id: str = "",
-) -> Dict:
+def send_build_request(bot_py: str, dockerfile: str, score_job_id: str) -> Dict[str, Any]:
     return _post_vm_request(
-        vm_endpoint=vm_endpoint,
-        path="/build",
-        payload={
+        "/build",
+        {
             "bot_py": bot_py,
             "dockerfile": dockerfile,
             "score_job_id": score_job_id,
         },
-        timeout=timeout,
-        ssl_verify=ssl_verify,
     )
 
 
-@validate_call
-def send_run_simple_bot_request(
-    vm_endpoint: str,
-    timeout: int = 120,
-    ssl_verify: bool = True,
-    score_job_id: str = "",
-) -> Dict:
+def send_run_simple_bot_request(score_job_id: str) -> Dict[str, Any]:
     return _post_vm_request(
-        vm_endpoint=vm_endpoint,
-        path="/run-simple-bot",
-        payload={"score_job_id": score_job_id, "timeout_sec": timeout},
-        timeout=timeout,
-        ssl_verify=ssl_verify,
+        "/run-simple-bot",
+        {
+            "score_job_id": score_job_id,
+            "timeout_sec": config.challenge.vm_timeout,
+        },
     )
 
 
-@validate_call
-def send_run_web_request(
-    vm_endpoint: str,
-    session_count: int,
-    timeout: int = 120,
-    ssl_verify: bool = True,
-    score_job_id: str = "",
-) -> Dict:
+def send_run_web_request(session_count: int, score_job_id: str) -> Dict[str, Any]:
     return _post_vm_request(
-        vm_endpoint=vm_endpoint,
-        path="/run-web",
-        payload={"session_count": session_count, "score_job_id": score_job_id},
-        timeout=timeout,
-        ssl_verify=ssl_verify,
-    )
-
-
-@validate_call
-def send_build_and_run_request(
-    vm_endpoint: str,
-    bot_py: str,
-    dockerfile: str,
-    session_count: int,
-    timeout: int = 120,
-    ssl_verify: bool = True,
-    score_job_id: str = "",
-) -> Dict:
-    return _post_vm_request(
-        vm_endpoint=vm_endpoint,
-        path="/build_and_run",
-        payload={
-            "bot_py": bot_py,
-            "dockerfile": dockerfile,
+        "/run-web",
+        {
             "session_count": session_count,
             "score_job_id": score_job_id,
         },
-        timeout=timeout,
-        ssl_verify=ssl_verify,
     )
+
+
+def run_web_phase(manager: "PayloadManager", session_count: int, score_job_id: str) -> bool:
+    """Run the web phase and return whether the runner failed."""
+    try:
+        logger.info(f"Starting {session_count} bot session(s) via runner")
+        send_run_web_request(session_count=session_count, score_job_id=score_job_id)
+    except Exception as err:
+        logger.error(f"Runner failed: {err}; returning runner_fail_score")
+        return True
+
+    deadline = time.time() + config.challenge.bot_timeout
+    while manager.completed_count() < session_count and time.time() < deadline:
+        logger.info(
+            f"Waiting... {manager.completed_count()}/{session_count} sessions recorded"
+        )
+        time.sleep(1)
+    return False
 
 
 __all__ = [
@@ -154,5 +122,5 @@ __all__ = [
     "send_build_request",
     "send_run_simple_bot_request",
     "send_run_web_request",
-    "send_build_and_run_request",
+    "run_web_phase",
 ]

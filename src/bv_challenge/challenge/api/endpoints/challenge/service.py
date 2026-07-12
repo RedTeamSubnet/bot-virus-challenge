@@ -1,110 +1,28 @@
 # -*- coding: utf-8 -*-
 
-import time
 import hashlib
 import pathlib
 import threading
-from typing import List, Union, Dict, Tuple, Optional
+import uuid
+from typing import Dict, Union
 
-from pydantic import validate_call
 from fastapi import Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import validate_call
 
-from api.core.constants import ErrorCodeEnum
-from api.core import utils
 from api.config import config
+from api.core.constants import ErrorCodeEnum
 from api.core.exceptions import BaseHTTPException
-from api.helpers.crypto import asymmetric as asymmetric_helper
-from api.endpoints.challenge.schemas import KeyPairPM, MinerInput, MinerOutput
-from api.endpoints.challenge import utils as ch_utils
 from api.endpoints.challenge import scoring
-from api.endpoints.challenge import eval_runner
-from api.endpoints.challenge.session_store import RunStore
+from api.endpoints.challenge import utils as challenge_utils
+from api.endpoints.challenge.payload_manager import PayloadManager
+from api.endpoints.challenge.schemas import MinerInput, MinerOutput
 from api.logger import logger
 
-_src_dir = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
 
-
-class TaskManager:
-    """
-    Task Manager for handling key pairs and evaluation metrics
-    during challenge sessions.
-    """
-
-    @validate_call
-    def __init__(self, uid: str = None):
-        self.uid = uid
-        # Serializes whole scoring runs so concurrent /score calls cannot
-        # clobber each other's run store.
-        self.run_lock = threading.Lock()
-        # Serializes the per-session key handoff (claim of the next session via
-        # /_random_val). Distinct from run_lock, which /score holds for the whole
-        # run -- the handoff happens *during* that hold, so it needs its own lock.
-        self.claim_lock = threading.Lock()
-        self.reset_tasks()
-
-    def reset_tasks(self) -> None:
-        """Reset all tasks: regenerate key pairs and run store."""
-
-        # Generate key pairs (one per session)
-        self.key_pairs = ch_utils.gen_key_pairs(
-            n_challenge=config.challenge.n_run_per_ch,
-            key_size=config.api.security.asymmetric.key_size,
-        )
-
-        # Build the run store. session_id = per-session nonce. Capture private
-        # keys now, before they are consumed/nulled during the session flow, so
-        # /_eval can attribute payloads by trial-decryption.
-        self.run_id = utils.gen_random_string(length=16)
-        _sessions: List[Tuple[str, str]] = [
-            (kp.nonce, kp.private_key) for kp in self.key_pairs
-        ]
-        self.run_store = RunStore.create(run_id=self.run_id, sessions=_sessions)
-
-        # Reset current task properties
-        self.cur_key_pair = None
-        self.cur_session_id: Optional[str] = None
-        self.cur_score = None
-
-    def pop_task(self) -> Union[KeyPairPM, None]:
-        """Advance to the next session (key pair); capture its session id."""
-        if not self.key_pairs:
-            self.cur_key_pair = None
-            self.cur_session_id = None
-            return None
-
-        self.cur_key_pair = self.key_pairs.pop(0)
-        # Capture the session id now; the nonce field gets nulled later.
-        self.cur_session_id = self.cur_key_pair.nonce
-        return self.cur_key_pair
-
-    def has_remaining_tasks(self) -> bool:
-        """Check if there are remaining tasks"""
-        return len(self.key_pairs) > 0
-
-    def get_remaining_task_count(self) -> int:
-        """Get the number of remaining tasks"""
-        return len(self.key_pairs)
-
-    def get_nonce(self) -> str:
-        _nonce_key: str = self.cur_key_pair.public_key
-        self.cur_key_pair.public_key = None
-        self.cur_key_pair.nonce = None
-        return _nonce_key
-
-    def get_session_info(self) -> Dict:
-        """Get information about current session for VM execution"""
-        return {
-            "total_sessions": config.challenge.n_run_per_ch,
-            "nonce": self.cur_key_pair.nonce if self.cur_key_pair else None,
-        }
-
-
-# Initialize the task manager as a global variable
-global tm
-tm = TaskManager()
-
+_SRC_DIR = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
+payload_manager = PayloadManager()
 _latest_result_lock = threading.Lock()
 _latest_result: Dict[str, Union[float, str, bool, None]] = {
     "score": None,
@@ -112,6 +30,7 @@ _latest_result: Dict[str, Union[float, str, bool, None]] = {
     "phase": "not_started",
     "simple_bot_passed": None,
 }
+SCHEMA_VERSION = "bv-runtime-1"
 
 
 def _set_latest_result(
@@ -138,33 +57,21 @@ def get_result() -> Dict[str, Union[float, str, bool, None]]:
 
 
 def get_task() -> MinerInput:
-    """Get the task for the miner"""
-    _miner_input = MinerInput()
-    return _miner_input
+    return MinerInput()
 
 
 @validate_call
 def score(miner_output: MinerOutput) -> float:
-    """Run one scoring run.
+    """Build, verify, and score one miner submission."""
+    expected_sessions = config.challenge.n_run_per_ch
+    required_tasks = config.challenge.n_ch_per_epoch * expected_sessions
+    score_job_id = uuid.uuid4().hex
+    bot_py = miner_output.get_file("bot.py")
+    dockerfile = miner_output.get_file("Dockerfile")
 
-    Orchestration: create a run (run_id + N session ids) -> start the bot
-    sessions via the runner -> wait for each session to report via /_eval ->
-    average over the EXPECTED session count (missing sessions count as
-    session_timeout_score). The run lock serializes concurrent /score calls.
-    """
-    _expected = config.challenge.n_run_per_ch
-    _num_tasks = config.challenge.n_ch_per_epoch * _expected
-
-    with tm.run_lock:
+    with payload_manager.run_lock:
         try:
-            ch_utils.send_build_request(
-                vm_endpoint=config.challenge.vm_endpoint,
-                bot_py=miner_output.bot_py,
-                dockerfile=miner_output.dockerfile,
-                timeout=config.challenge.vm_timeout,
-                ssl_verify=config.challenge.vm_ssl_verify,
-                score_job_id=miner_output.score_job_id,
-            )
+            challenge_utils.send_build_request(bot_py, dockerfile, score_job_id)
         except Exception as err:
             logger.error(f"Failed to build miner container: {err}")
             _set_latest_result(
@@ -176,12 +83,7 @@ def score(miner_output: MinerOutput) -> float:
             return 0.0
 
         try:
-            _simple_result = ch_utils.send_run_simple_bot_request(
-                vm_endpoint=config.challenge.vm_endpoint,
-                timeout=config.challenge.vm_timeout,
-                ssl_verify=config.challenge.vm_ssl_verify,
-                score_job_id=miner_output.score_job_id,
-            )
+            simple_result = challenge_utils.send_run_simple_bot_request(score_job_id)
         except Exception as err:
             logger.error(f"Simple bot detection phase failed: {err}")
             _set_latest_result(
@@ -192,8 +94,8 @@ def score(miner_output: MinerOutput) -> float:
             )
             return 0.0
 
-        if _simple_result.get("passed") is not True:
-            logger.info(f"Simple bot detection rejected miner: {_simple_result}")
+        if simple_result.get("passed") is not True:
+            logger.info(f"Simple bot detection rejected miner: {simple_result}")
             _set_latest_result(
                 score=0.0,
                 feedback="failed in simple bot detection phase",
@@ -202,256 +104,122 @@ def score(miner_output: MinerOutput) -> float:
             )
             return 0.0
 
-        # Start a fresh run if the previous one is exhausted.
-        if (not tm.has_remaining_tasks()) or (
-            tm.get_remaining_task_count() < _num_tasks
+        if (
+            not payload_manager.has_remaining_tasks()
+            or payload_manager.remaining_task_count() < required_tasks
         ):
-            tm.reset_tasks()
-
-        _run_store = tm.run_store
-        _run_id = tm.run_id
-
-        # Claim the first session for the page-serving flow.
-        task = tm.pop_task()
-        tm.cur_score = None
-        if not task:
+            payload_manager.reset()
+        if payload_manager.pop_task() is None:
             raise BaseHTTPException(
                 error_enum=ErrorCodeEnum.TOO_MANY_REQUESTS,
                 message="No initialized key pairs, or out of tasks!",
             )
 
-        _runner_failed = False
-
-        def _start_runner() -> None:
-            logger.info(
-                f"[run {_run_id}] Starting {_expected} bot session(s) via runner..."
-            )
-            ch_utils.send_run_web_request(
-                vm_endpoint=config.challenge.vm_endpoint,
-                session_count=_expected,
-                timeout=config.challenge.vm_timeout,
-                ssl_verify=config.challenge.vm_ssl_verify,
-                score_job_id=miner_output.score_job_id,
-            )
-
-        def _wait_for_completion() -> None:
-            # Wait for sessions to report via /_eval, bounded by bot_timeout.
-            _i = 0
-            while (
-                _run_store.completed_count() < _expected
-                and _i < config.challenge.bot_timeout
-            ):
-                logger.info(
-                    f"[run {_run_id}] Waiting... "
-                    f"{_run_store.completed_count()}/{_expected} sessions recorded"
-                )
-                time.sleep(1)
-                _i += 1
-
-        def _on_runner_error(err: Exception) -> None:
-            nonlocal _runner_failed
-            _runner_failed = True
-            logger.error(
-                f"[run {_run_id}] Runner failed: {err}; returning runner_fail_score."
-            )
-
-        # Average over EXPECTED sessions; incomplete ones count as timeout.
-        _score = eval_runner.run_scoring(
-            store=_run_store,
-            start_runner=_start_runner,
-            wait_for_completion=_wait_for_completion,
-            timeout_score=config.challenge.session_timeout_score,
-            runner_fail_score=config.challenge.runner_fail_score,
-            on_runner_error=_on_runner_error,
+        runner_failed = challenge_utils.run_web_phase(
+            payload_manager,
+            session_count=expected_sessions,
+            score_job_id=score_job_id,
+        )
+        final_score = payload_manager.finalize(
+            timeout_score=config.challenge.session_timeout_score
         )
         logger.info(
-            f"[run {_run_id}] Final score (avg over {_expected} sessions): {_score}"
+            f"[run {payload_manager.run_id}] Final score: {final_score}"
         )
         _set_latest_result(
-            score=float(_score),
-            feedback=(
-                "failed in web scoring phase"
-                if _runner_failed
-                else "web scoring completed"
-            ),
+            score=float(final_score),
+            feedback="failed in web scoring phase" if runner_failed else "web scoring completed",
             phase="web",
             simple_bot_passed=True,
         )
-        return _score
-
-
-# Schema version of the non-behavioral browser/runtime integrity payload the
-# SDK emits. Bump when the collected payload shape changes.
-SCHEMA_VERSION = "bv-runtime-1"
+        return float(final_score)
 
 
 def _short_digest(*parts: str) -> str:
-    """Stable short hex fingerprint over the given parts (non-secret)."""
-    _hasher = hashlib.sha256()
-    for _part in parts:
-        _hasher.update((_part or "").encode("utf-8"))
-        _hasher.update(b"\x00")
-    return _hasher.hexdigest()[:16]
+    hasher = hashlib.sha256()
+    for part in parts:
+        hasher.update((part or "").encode("utf-8"))
+        hasher.update(b"\x00")
+    return hasher.hexdigest()[:16]
 
 
 @validate_call(config={"arbitrary_types_allowed": True})
 def get_web(request: Request) -> HTMLResponse:
-    """Serve the minimal browser-verification page.
-
-    The page only loads the SDK, which collects non-behavioral browser/runtime
-    integrity signals and submits the encrypted payload to ``/_eval``. The
-    backend injects the per-session public key (encryption key material) plus
-    non-secret session-binding fields.
-    """
-    # Serve the CURRENT session's public key so the SDK encrypts with a key
-    # whose private half lives in the run store (store.private_keys) and can
-    # decrypt the /_eval payload. Then advance the claim pointer so the next
-    # session's page load gets the next key. score() pre-claims the first one,
-    # so sequential /_web loads serve session keys 1..N in order.
-    with tm.claim_lock:
-        _cur = tm.cur_key_pair
-        if _cur and _cur.public_key:
-            _nonce = _cur.nonce
-            _public_key = _cur.public_key
-            tm.pop_task()  # advance to the next session for the next /_web load
-        else:
-            _nonce = utils.gen_random_string()
-            _public_key = asymmetric_helper.gen_key_pair(
-                key_size=config.api.security.asymmetric.key_size, as_str=True
-            )[1]
-            logger.warning(
-                "/_web called with no active session key; serving a throwaway key "
-                "(this endpoint shouldn't be called directly outside a run)."
-            )
-
-    _public_key_id = _short_digest(_public_key)
-    _config_hash = _short_digest(
-        SCHEMA_VERSION,
-        str(config.api.security.asymmetric.key_size),
-    )
-
-    _templates = Jinja2Templates(directory=(_src_dir / "./templates/html"))
-    _html_response = _templates.TemplateResponse(
+    nonce, public_key, active = payload_manager.claim_web_key()
+    if not active:
+        logger.warning(
+            "/_web called with no active session key; serving a throwaway key"
+        )
+    templates = Jinja2Templates(directory=_SRC_DIR / "./templates/html")
+    return templates.TemplateResponse(
         request=request,
         name="index.html",
         context={
-            "session_id": _nonce,
-            "nonce": _nonce,
-            "public_key": _public_key,
-            "public_key_id": _public_key_id,
-            "config_hash": _config_hash,
+            "session_id": nonce,
+            "nonce": nonce,
+            "public_key": public_key,
+            "public_key_id": _short_digest(public_key),
+            "config_hash": _short_digest(
+                SCHEMA_VERSION,
+                str(config.api.security.asymmetric.key_size),
+            ),
             "schema_version": SCHEMA_VERSION,
         },
     )
-    return _html_response
 
 
 @validate_call
 def get_random_val(nonce: str) -> str:
-    """Hand out the current session's public key and advance to the next session.
-
-    This is the per-session *claim* point: validating the nonce, returning the
-    key, and advancing the pointer are done atomically under ``claim_lock`` so
-    that the serial key handoff is correct without ``/_eval`` ever touching the
-    pointer. Attribution of the eventual callback is independent of this pointer
-    (it is done by trial-decryption in ``eval_bot``).
-    """
-    with tm.claim_lock:
-        if not tm.cur_key_pair:
+    with payload_manager.claim_lock:
+        current = payload_manager.cur_key_pair
+        if not current:
             raise BaseHTTPException(
                 error_enum=ErrorCodeEnum.BAD_REQUEST,
-                message="Not initialized key pair or out of key pair, this endpoint is shouldn't be called directly!",
+                message="No initialized key pair or out of keys.",
             )
-
-        if tm.cur_key_pair.nonce != nonce:
+        if current.nonce != nonce:
             raise BaseHTTPException(
                 error_enum=ErrorCodeEnum.UNAUTHORIZED,
                 message="Invalid nonce value!",
             )
-
-        if not tm.cur_key_pair.public_key:
+        if not current.public_key:
             raise BaseHTTPException(
                 error_enum=ErrorCodeEnum.TOO_MANY_REQUESTS,
                 message="Nonce is already retrieved!",
             )
-
-        _nonce_key = tm.get_nonce()
-        # Advance the claim pointer to the next session for the next bot. The
-        # session just handed out stays in run_store and is attributed by its
-        # key at /_eval time.
-        tm.pop_task()
-        return _nonce_key
+        public_key = payload_manager.get_nonce()
+        payload_manager.pop_task()
+        return public_key
 
 
 def _score_payload(plain_data: dict) -> float:
-    """Validate shape then run the scorer for one decrypted payload.
-
-    Never raises: any unexpected error falls back to the configured error score
-    so ``eval_bot`` can always record a result for an attributed session.
-    """
     try:
-        _shape_ok, _shape_reason = scoring.validate_shape(plain_data)
-        if not _shape_ok:
-            logger.info(f"Layer 1 shape check rejected session: {_shape_reason}")
+        shape_ok, shape_reason = scoring.validate_shape(plain_data)
+        if not shape_ok:
+            logger.info(f"Layer 1 shape check rejected session: {shape_reason}")
             return config.challenge.gate_fail_score
         return scoring.score_with_metrics_processor(
             data=plain_data,
             error_score=config.challenge.metrics_processor_error_score,
         )
     except Exception as err:
-        logger.error(f"Unexpected scoring error; recording error_score: {err}")
+        logger.error(f"Unexpected scoring error; recording error score: {err}")
         return config.challenge.metrics_processor_error_score
 
 
 @validate_call
 def eval_bot(data: str) -> None:
-    """Evaluate exactly one browser session callback.
-
-    Pure attribution + record -- it does NOT touch the session-claim pointer
-    (``cur_key_pair``/``pop_task``); that lives in ``get_random_val``.
-
-    Invariants:
-      * Records each session's score EXACTLY ONCE; a duplicate/replayed callback
-        is ignored and never double-counts (``RunStore.record`` is the atomic
-        source of truth).
-      * An unattributable payload (no current session key decrypts it --
-        stale/previous-run/garbage/tampered) is logged and ignored; it never
-        consumes or advances another session. A real session that never reports
-        is handled by ``RunStore.finalize`` timeout padding instead.
-      * Never raises; returns nothing (the endpoint returns a generic message
-        only -- the real score is never exposed).
-    """
-    _store = tm.run_store
-    if _store is None:
-        logger.warning("eval_bot called with no active run; ignoring.")
-        return
-
-    _outcome = eval_runner.process_eval(
-        _store,
+    outcome = payload_manager.process_eval(
         data,
-        decrypt_fn=ch_utils.decrypt,
+        decrypt_fn=challenge_utils.decrypt,
         score_fn=_score_payload,
     )
-
-    if _outcome.status == "recorded":
-        logger.info(f"Recorded session {_outcome.session_id} score: {_outcome.score}")
-    elif _outcome.status == "duplicate":
-        logger.warning(
-            f"Duplicate /_eval for session {_outcome.session_id}; not re-recording."
-        )
-    else:  # "unattributable"
-        logger.warning(
-            "Unattributable /_eval payload (stale/garbage/tampered); ignoring."
-        )
-
-    return
+    if outcome.status == "recorded":
+        logger.info(f"Recorded session {outcome.session_id} score: {outcome.score}")
+    elif outcome.status == "duplicate":
+        logger.warning(f"Duplicate /_eval for session {outcome.session_id}")
+    else:
+        logger.warning("Unattributable /_eval payload; ignoring")
 
 
-__all__ = [
-    "get_task",
-    "get_web",
-    "get_random_val",
-    "score",
-    "get_result",
-    "eval_bot",
-]
+__all__ = ["get_task", "get_web", "get_random_val", "score", "get_result", "eval_bot"]
