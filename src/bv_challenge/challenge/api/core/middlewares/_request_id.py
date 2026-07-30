@@ -1,5 +1,7 @@
+# -*- coding: utf-8 -*-
+
 from uuid import uuid4
-from collections.abc import Callable
+from typing import Callable
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request, Response
@@ -16,9 +18,9 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         _request_id: str = uuid4().hex
         if "X-Request-ID" in request.headers:
-            _request_id: str = request.headers.get("X-Request-ID", _request_id)
+            _request_id: str = request.headers.get("X-Request-ID")
         elif "X-Correlation-ID" in request.headers:
-            _request_id: str = request.headers.get("X-Correlation-ID", _request_id)
+            _request_id: str = request.headers.get("X-Correlation-ID")
 
         request.state.request_id = _request_id
         response: Response = await call_next(request)

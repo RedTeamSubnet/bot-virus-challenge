@@ -26,7 +26,7 @@ fi
 
 ## --- Variables --- ##
 # Load from environment variables:
-VERSION_FILE_PATH="${VERSION_FILE_PATH:-./VERSION.txt}"
+VERSION_FILE_PATH="${VERSION_FILE_PATH:-./src/bv_challenge/__version__.py}"
 
 
 _BUMP_TYPE=""
@@ -130,7 +130,7 @@ main()
 
 	echo "[INFO]: Bumping version to '${_new_version}'..."
 	# Update the version file with the new version:
-	echo "${_new_version}" > "${VERSION_FILE_PATH}" || exit 2
+	echo -e "__version__ = \"${_new_version}\"" > "${VERSION_FILE_PATH}" || exit 2
 	echo "[OK]: New version: '${_new_version}'"
 
 	./scripts/sync-versions.sh -a || exit 2
