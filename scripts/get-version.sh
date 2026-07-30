@@ -15,12 +15,12 @@ cd "${_PROJECT_DIR}" || exit 2
 
 ## --- Variables --- ##
 # Load from environment variables:
-VERSION_FILE_PATH="${VERSION_FILE_PATH:-./VERSION.txt}"
+VERSION_FILE_PATH="${VERSION_FILE_PATH:-./src/bv_challenge/__version__.py}"
 ## --- Variables --- ##
 
 
 if [ -n "${VERSION_FILE_PATH}" ] && [ -f "${VERSION_FILE_PATH}" ]; then
-	_current_version=$(cat "${VERSION_FILE_PATH}") || exit 2
+	_current_version=$(< "${VERSION_FILE_PATH}" grep "__version__ = " | awk -F' = ' '{print $2}' | tr -d '"') || exit 2
 else
 	_current_version="0.0.0"
 fi

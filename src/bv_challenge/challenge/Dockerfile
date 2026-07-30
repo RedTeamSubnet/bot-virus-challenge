@@ -29,6 +29,7 @@ RUN --mount=type=cache,target=/root/.cache,sharing=locked \
 # COPY ./requirements* ./
 RUN	--mount=type=cache,target=/root/.cache,sharing=locked \
 	--mount=type=bind,source=requirements.txt,target=requirements.txt \
+	--mount=type=bind,source=requirements,target=requirements \
 	python3 -m uv pip install --prefix=/install -r ./requirements.txt
 
 
@@ -140,6 +141,8 @@ FROM base AS app
 
 WORKDIR "${BV_CHALLENGE_API_DIR}"
 COPY --chown=${UID}:${GID} ./api ${BV_CHALLENGE_API_DIR}/api
+COPY --chown=${UID}:${GID} ./bot ${BV_CHALLENGE_API_DIR}/bot
+COPY --chown=${UID}:${GID} ./templates ${BV_CHALLENGE_API_DIR}/templates
 COPY --chown=${UID}:${GID} --chmod=770 ./scripts/*.sh /usr/local/bin/
 
 # VOLUME ["${BV_CHALLENGE_API_DATA_DIR}"]

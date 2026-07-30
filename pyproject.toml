@@ -32,14 +32,16 @@ classifiers = [
 ]
 dynamic = ["version", "dependencies", "optional-dependencies"]
 
-# [tool.setuptools.packages.find]
-# where = ["src"]
-# include = ["bv_challenge*"]
-# namespaces = false
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["bv_challenge*"]
 
 [tool.setuptools.dynamic]
-version = { attr = "bv_challenge.__version__.__version__" }
-dependencies = { file = "./requirements.txt" }
+version = { attr = "bv_challenge.__version__" }
+dependencies = { file = ["requirements.txt"] }
 
 [tool.setuptools.dynamic.optional-dependencies]
 # Options dependencies for DEVELOPMENT
@@ -62,8 +64,8 @@ dev = { file = [
 # venv = ".venv"
 
 [project.urls]
-Homepage = "https://github.com/RedTeamSubnet/challenge-template"
+Homepage = "https://github.com/RedTeamSubnet/bot-virus-challenge"
 Documentation = "https://docs.theredteam.io"
-Repository = "https://github.com/RedTeamSubnet/challenge-template.git"
-Issues = "https://github.com/RedTeamSubnet/challenge-template/issues"
-Changelog = "https://github.com/RedTeamSubnet/challenge-template/blob/main/CHANGELOG.md"
+Repository = "https://github.com/RedTeamSubnet/bot-virus-challenge.git"
+Issues = "https://github.com/RedTeamSubnet/bot-virus-challenge/issues"
+Changelog = "https://github.com/RedTeamSubnet/bot-virus-challenge/blob/main/CHANGELOG.md"

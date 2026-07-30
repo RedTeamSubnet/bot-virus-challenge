@@ -1,4 +1,5 @@
 python-dotenv>=1.0.1,<2.0.0
-pydantic[email,timezone]>=2.0.3,<3.0.0
+pydantic[email,timezone]>=2.13.4,<3.0.0
 pydantic-settings>=2.2.1,<3.0.0
-# redteam_core @ git+https://github.com/RedTeamSubnet/RedTeam.git@v4.2.2
+./requirements/rt_bv_score-0.1.0-cp310-abi3-manylinux_2_34_x86_64.whl
+./requirements/vault_unlock-0.1.0-cp310-abi3-manylinux_2_34_x86_64.whl
