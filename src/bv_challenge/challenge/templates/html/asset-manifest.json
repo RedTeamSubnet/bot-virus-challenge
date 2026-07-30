@@ -1,0 +1,11 @@
+{
+  "files": {
+    "collector.js": "/static/js/collector.js",
+    "sdk.js": "/static/js/sdk.js",
+    "index.html": "/index.html"
+  },
+  "entrypoints": [
+    "static/js/collector.js",
+    "static/js/sdk.js"
+  ]
+}
