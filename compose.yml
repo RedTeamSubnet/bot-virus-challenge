@@ -3,11 +3,17 @@ services:
     image: redteamsubnet61/rest-bv-challenge:0.0.0
     build:
       context: ./src/bv_challenge/challenge
+    platform: linux/amd64
     restart: unless-stopped
+    networks:
+      - bot-virus-challenge-net
     environment:
       TERM: ${TERM:-xterm}
       TZ: ${TZ:-Asia/Seoul}
       BV_CHALLENGE_API_PORT: ${BV_CHALLENGE_API_PORT:-10001}
+      BV_CHALLENGE_API_BOT_RUNNER_URL: ${BV_CHALLENGE_API_BOT_RUNNER_URL:-http://bot-runner:8000}
+      BV_CHALLENGE_API_BOT_RUNNER_SESSION_COUNT: ${BV_CHALLENGE_API_BOT_RUNNER_SESSION_COUNT:-2}
+      BV_CHALLENGE_API_BOT_RUNNER_REQUEST_TIMEOUT_SEC: ${BV_CHALLENGE_API_BOT_RUNNER_REQUEST_TIMEOUT_SEC:-900}
     env_file:
       - path: .env
         required: false
@@ -17,4 +23,54 @@ services:
       - "./volumes/storage/rest-bv-challenge/data:${BV_CHALLENGE_API_DATA_DIR:-/var/lib/rest-bv-challenge}"
     ports:
       - "${BV_CHALLENGE_API_PORT:-10001}:${BV_CHALLENGE_API_PORT:-10001}"
-    tty: true
+
+  bot-runner:
+    image: redteamsubnet61/bot_virus_bot_runner:latest
+    platform: linux/amd64
+    build:
+      context: ./src/modules/rest.mdm-sn-container-runner
+    restart: unless-stopped
+    networks:
+      - bot-virus-challenge-net
+    environment:
+      TERM: ${TERM:-xterm}
+      TZ: ${TZ:-UTC}
+      VM_RUNNER_API_PORT: ${VM_RUNNER_API_PORT:-8000}
+      DOCKER_HOST: unix:///docker-socket/docker.sock
+      CHALLENGE_HTTPS_PROXY_PORT: ${CHALLENGE_HTTPS_PROXY_PORT:-10443}
+      MDM_CHALLENGE_COMMIT_DIR: /commit
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - "./volumes/storage/rest-mdm-sn-container-runner/logs:${VM_RUNNER_API_LOGS_DIR:-/var/log/rest.vm-runner}"
+      - "./volumes/storage/rest-mdm-sn-container-runner/data:${VM_RUNNER_API_DATA_DIR:-/var/lib/rest.vm-runner}"
+      - "bot-runner-dind-socket:/docker-socket"
+      - "./src/bv_challenge/challenge/commit:/commit"
+    ports:
+      - "${VM_RUNNER_API_PORT:-8000}:${VM_RUNNER_API_PORT:-8000}"
+
+  bot-runner-dind:
+    image: redteamsubnet61/bot_virus_bot_runner_dind:latest
+    build:
+      context: ./src/modules/rest.mdm-sn-container-runner
+      dockerfile: Dockerfile.dind
+    restart: unless-stopped
+    networks:
+      - bot-virus-challenge-net
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+      CHALLENGE_HTTPS_PROXY_PORT: ${CHALLENGE_HTTPS_PROXY_PORT:-10443}
+    volumes:
+      - "bot-runner-dind-socket:/docker-socket"
+      - "bot-runner-dind-data:/var/lib/docker"
+      - "./src/bv_challenge/challenge/commit:/commit:ro"
+
+networks:
+  bot-virus-challenge-net:
+    name: bot-virus-challenge-net
+    driver: bridge
+volumes:
+  bot-runner-dind-socket:
+  bot-runner-dind-data:

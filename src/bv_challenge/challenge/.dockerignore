@@ -551,6 +551,7 @@ README.md
 **/compose.sh
 **/compose.override.y*ml
 **/Dockerfile*
+!commit/bot/Dockerfile
 **/Makefile
 **/mkdocs.yml
 **/pm2-process.json*
