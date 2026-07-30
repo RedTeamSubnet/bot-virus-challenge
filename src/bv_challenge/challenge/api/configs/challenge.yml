@@ -1,0 +1,12 @@
+challenge:
+  n_run_per_ch: 10
+  bot_timeout: 200
+  # Layer 1/2 fallback score policy
+  gate_fail_score: 0.0
+  metrics_processor_error_score: 0.5
+  session_timeout_score: 0.0
+  runner_fail_score: 0.0
+  # VM configuration for remote Docker build/run
+  vm_endpoint: "http://bot-runner:8000"
+  vm_timeout: 300
+  vm_ssl_verify: false

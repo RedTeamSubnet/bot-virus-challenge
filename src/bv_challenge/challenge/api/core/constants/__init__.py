@@ -1,4 +1,4 @@
-# flake8: noqa
+# -*- coding: utf-8 -*-
 
 from ._base import *
 from ._regex import *

@@ -1,18 +1,29 @@
-from typing import Any
+# -*- coding: utf-8 -*-
 
-from pydantic import Field
+from enum import Enum
+from typing import Any, Union, Optional
 
-from potato_util.constants import HTTPMethodEnum
+from pydantic import Field, constr
 
 from api.config import config
-
 from ._base import ExtraBasePM, BasePM
 
 
+class MethodEnum(str, Enum):
+    GET = "GET"
+    POST = "POST"
+    PUT = "PUT"
+    PATCH = "PATCH"
+    DELETE = "DELETE"
+    HEAD = "HEAD"
+    OPTIONS = "OPTIONS"
+    CONNECT = "CONNECT"
+    TRACE = "TRACE"
+
+
 class LinksResPM(ExtraBasePM):
-    self_link: str | None = Field(
+    self_link: Optional[constr(strip_whitespace=True, max_length=2048)] = Field(  # type: ignore
         default=None,
-        max_length=2048,
         alias="self",
         title="Self link",
         description="Link to the current resource.",
@@ -21,33 +32,29 @@ class LinksResPM(ExtraBasePM):
 
 
 class PageLinksResPM(LinksResPM):
-    first_link: str | None = Field(
+    first_link: Optional[constr(strip_whitespace=True, max_length=2048)] = Field(  # type: ignore
         default=None,
-        max_length=2048,
         alias="first",
         title="First link",
         description="Link to the first page of the resource.",
         examples=[f"{config.api.prefix}/resources/?skip=0&limit=100"],
     )
-    prev_link: str | None = Field(
+    prev_link: Optional[constr(strip_whitespace=True, max_length=2048)] = Field(  # type: ignore
         default=None,
-        max_length=2048,
         alias="prev",
         title="Previous link",
         description="Link to the previous page of the resource.",
         examples=[f"{config.api.prefix}/resources/?skip=100&limit=100"],
     )
-    next_link: str | None = Field(
+    next_link: Optional[constr(strip_whitespace=True, max_length=2048)] = Field(  # type: ignore
         default=None,
-        max_length=2048,
         alias="next",
         title="Next link",
         description="Link to the next page of the resource.",
         examples=[f"{config.api.prefix}/resources/?skip=300&limit=100"],
     )
-    last_link: str | None = Field(
+    last_link: Optional[constr(strip_whitespace=True, max_length=2048)] = Field(  # type: ignore
         default=None,
-        max_length=2048,
         alias="last",
         title="Last link",
         description="Link to the last page of the resource.",
@@ -56,24 +63,48 @@ class PageLinksResPM(LinksResPM):
 
 
 class MetaResPM(ExtraBasePM):
-    base_url: str | None = Field(
+    request_id: Optional[
+        constr(strip_whitespace=True, min_length=8, max_length=64)  # type: ignore
+    ] = Field(
         default=None,
-        min_length=2,
-        max_length=256,
+        title="Request ID",
+        description="Current request ID.",
+        examples=["211203afa2844d55b1c9d38b9f8a7063"],
+    )
+    base_url: Optional[
+        constr(strip_whitespace=True, min_length=2, max_length=256)  # type: ignore
+    ] = Field(
+        default=None,
         title="Base URL",
         description="Current request base URL.",
         examples=["https://api.example.com"],
     )
-    method: HTTPMethodEnum | None = Field(
+    method: Optional[MethodEnum] = Field(
         default=None,
         title="Method",
         description="Current request method.",
         examples=["GET"],
     )
+    api_version: constr(strip_whitespace=True) = Field(  # type: ignore
+        default=config.api.version,
+        min_length=1,
+        max_length=16,
+        title="API version",
+        description="Current API version.",
+        examples=[config.api.version],
+    )
+    version: constr(strip_whitespace=True) = Field(  # type: ignore
+        default=config.version,
+        min_length=5,
+        max_length=32,
+        title="Version",
+        description="Current system version.",
+        examples=[config.version],
+    )
 
 
 class ErrorResPM(BasePM):
-    code: str = Field(
+    code: constr(strip_whitespace=True) = Field(  # type: ignore
         ...,
         min_length=3,
         max_length=36,
@@ -81,14 +112,14 @@ class ErrorResPM(BasePM):
         description="Code that represents the error.",
         examples=["400_00000"],
     )
-    description: str | None = Field(
+    description: Optional[constr(strip_whitespace=True)] = Field(  # type: ignore
         default=None,
         max_length=1024,
         title="Error description",
         description="Description of the error.",
         examples=["Bad request syntax or unsupported method."],
     )
-    detail: Any | dict | list = Field(
+    detail: Union[Any, dict, list] = Field(
         default=None,
         title="Error detail",
         description="Detail of the error.",
@@ -112,7 +143,7 @@ class BaseResPM(BasePM):
         description="Response message about the current request.",
         examples=["Successfully processed the request."],
     )
-    data: Any | dict | list = Field(
+    data: Union[Any, dict, list] = Field(
         default=None,
         title="Data",
         description="Resource data or any data related to response.",
@@ -128,11 +159,22 @@ class BaseResPM(BasePM):
         title="Meta",
         description="Meta information about the current request.",
     )
-    error: ErrorResPM | Any = Field(
+    error: Union[ErrorResPM, Any] = Field(
         default=None,
         title="Error",
         description="Error information about the current request.",
         examples=[None],
+    )
+
+
+class HealthResPM(BasePM):
+    status: str = Field(
+        default="healthy",
+        min_length=2,
+        max_length=32,
+        title="Status",
+        description="Health status of the service.",
+        examples=["healthy"],
     )
 
 
@@ -142,4 +184,5 @@ __all__ = [
     "MetaResPM",
     "ErrorResPM",
     "BaseResPM",
+    "HealthResPM",
 ]

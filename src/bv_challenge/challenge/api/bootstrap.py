@@ -1,17 +1,16 @@
-# Standard libraries
-from typing import Any
-from collections.abc import Callable
+# -*- coding: utf-8 -*-
 
-# Third-party libraries
+## Standard libraries
+import os
+from typing import Union
+
+## Third-party libraries
 import uvicorn
 from uvicorn._types import ASGIApplication
 from pydantic import validate_call
 from fastapi import FastAPI
 
-from beans_logging_fastapi import add_logger
-
-# Internal modules
-from api.__version__ import __version__
+## Internal modules
 from api.config import config
 from api.lifespan import lifespan, pre_init
 from api.middleware import add_middlewares
@@ -31,17 +30,11 @@ def create_app() -> FastAPI:
     pre_init()
 
     app = FastAPI(
-        title=config.api.title,
-        version=__version__,
+        title=config.api.name,
+        version=config.version,
         lifespan=lifespan,
         default_response_class=BaseResponse,
         **config.api.docs.model_dump(exclude={"enabled"}),
-    )
-
-    add_logger(
-        app=app,
-        config=config.api.logger,
-        has_proxy_headers=config.api.uvicorn.proxy_headers,
     )
 
     add_middlewares(app=app)
@@ -53,21 +46,35 @@ def create_app() -> FastAPI:
 
 
 @validate_call(config={"arbitrary_types_allowed": True})
-def run_server(app: FastAPI | ASGIApplication | Callable[..., Any] | str) -> None:
+def run_server(app: Union[ASGIApplication, str] = "main:app") -> None:
     """Run uvicorn server.
 
     Args:
-        app (FastAPI            |
-             ASGIApplication    |
-             Callable[..., Any] |
-             str                 , required): FastAPI application instance or ASGI application or import string.
+        app (Union[ASGIApplication, str], optional): ASGI application instance or module path.
     """
+
+    _ssl_keyfile: Union[str, None] = None
+    _ssl_certfile: Union[str, None] = None
+
+    if config.api.security.ssl.enabled:
+        _ssl_keyfile = os.path.join(
+            config.api.paths.ssl_dir, config.api.security.ssl.key_fname
+        )
+        _ssl_certfile = os.path.join(
+            config.api.paths.ssl_dir, config.api.security.ssl.cert_fname
+        )
 
     uvicorn.run(
         app=app,
         host=config.api.bind_host,
         port=config.api.port,
-        **config.api.uvicorn.model_dump(),
+        access_log=False,
+        server_header=False,
+        proxy_headers=config.api.behind_proxy,
+        forwarded_allow_ips=config.api.security.forwarded_allow_ips,
+        ssl_keyfile=_ssl_keyfile,
+        ssl_certfile=_ssl_certfile,
+        **config.api.dev.model_dump(),
     )
 
     return

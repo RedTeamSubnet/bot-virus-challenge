@@ -1,7 +1,11 @@
-from fastapi import APIRouter, Request
+# -*- coding: utf-8 -*-
 
-from api.core.schemas import BaseResPM
+from fastapi import APIRouter, Request, Response
+from fastapi.responses import JSONResponse
+
+from api.core.schemas import BaseResPM, HealthResPM
 from api.core.responses import BaseResponse
+
 
 router = APIRouter(tags=["Utils"])
 
@@ -32,22 +36,15 @@ async def get_ping(request: Request):
     "/health",
     summary="Health",
     description="Check health of all related backend services.",
-    response_model=BaseResPM,
+    response_class=JSONResponse,
+    response_model=HealthResPM,
 )
-async def get_health(request: Request):
-    _message = "Everything is OK."
-    _data = {"api": {"message": "API is up.", "is_alive": True}}
+async def get_health(response: Response):
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
 
-    return BaseResponse(
-        request=request,
-        content=_data,
-        message=_message,
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
+    return {"status": "healthy"}
 
 
 __all__ = ["router"]
