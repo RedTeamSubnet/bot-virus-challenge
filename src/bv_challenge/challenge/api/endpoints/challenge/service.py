@@ -267,11 +267,12 @@ def _score_payload(plain_data: dict) -> tuple[float, Dict[str, float]]:
 
 
 @validate_call
-def eval_bot(data: str) -> None:
+def eval_bot(data: str, trusted_request: dict | None = None) -> None:
     outcome = payload_manager.process_eval(
         data,
         decrypt_fn=challenge_utils.decrypt,
         score_fn=_score_payload,
+        trusted_context=trusted_request,
     )
     if outcome.status == "recorded":
         logger.info(f"Recorded session {outcome.session_id} score: {outcome.score}")

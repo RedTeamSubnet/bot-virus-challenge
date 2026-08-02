@@ -137,6 +137,7 @@ class PayloadManager:
         data: str,
         decrypt_fn: Callable[..., str],
         score_fn: Callable[[dict], Tuple[float, Dict[str, float]]],
+        trusted_context: Optional[Dict[str, Optional[str]]] = None,
     ) -> EvalOutcome:
         for session_id, private_key in list(self.private_keys.items()):
             try:
@@ -159,6 +160,15 @@ class PayloadManager:
                 _stamp_binding_verdict(
                     payload, session_id=session_id, duplicate=False
                 )
+                # This field is server-owned. Add it only after validating the
+                # client payload hash, and always replace any client-supplied
+                # value before the private scorer sees the payload.
+                payload["_trustedRequest"] = {
+                    key: value
+                    for key, value in (trusted_context or {}).items()
+                    if key in {"userAgent", "acceptLanguage", "secChUa"}
+                    and isinstance(value, str)
+                }
                 score, category_scores = score_fn(payload)
                 record.score = score
                 record.category_scores = category_scores
