@@ -161,7 +161,14 @@ def _post_eval_bot(
     try:
         # Extract the data from the nested structure
         data = payload.error.data
-        service.eval_bot(data=data)
+        service.eval_bot(
+            data=data,
+            trusted_request={
+                "userAgent": request.headers.get("user-agent"),
+                "acceptLanguage": request.headers.get("accept-language"),
+                "secChUa": request.headers.get("sec-ch-ua"),
+            },
+        )
 
         logger.success(f"[{_request_id}] - Successfully evaluated the bot.")
     except Exception as err:
