@@ -6,7 +6,7 @@ services:
     platform: linux/amd64
     restart: unless-stopped
     networks:
-      - bot-virus-challenge-net
+      - redteam_local
     environment:
       TERM: ${TERM:-xterm}
       TZ: ${TZ:-Asia/Seoul}
@@ -31,7 +31,7 @@ services:
       context: ./src/modules/rest.mdm-sn-container-runner
     restart: unless-stopped
     networks:
-      - bot-virus-challenge-net
+      - redteam_local
     environment:
       TERM: ${TERM:-xterm}
       TZ: ${TZ:-UTC}
@@ -57,7 +57,7 @@ services:
       dockerfile: Dockerfile.dind
     restart: unless-stopped
     networks:
-      - bot-virus-challenge-net
+      - redteam_local
     privileged: true
     environment:
       DOCKER_TLS_CERTDIR: ""
@@ -68,8 +68,8 @@ services:
       - "./src/bv_challenge/challenge/commit:/commit:ro"
 
 networks:
-  bot-virus-challenge-net:
-    name: bot-virus-challenge-net
+  redteam_local:
+    name: redteam_local
     driver: bridge
 volumes:
   bot-runner-dind-socket:
