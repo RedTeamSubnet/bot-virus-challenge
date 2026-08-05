@@ -30,7 +30,8 @@ RUN --mount=type=cache,target=/root/.cache,sharing=locked \
 RUN	--mount=type=cache,target=/root/.cache,sharing=locked \
 	--mount=type=bind,source=requirements.txt,target=requirements.txt \
 	--mount=type=bind,source=requirements,target=requirements \
-	python3 -m uv pip install --prefix=/install -r ./requirements.txt
+	python3 -m uv pip install --prefix=/install -r ./requirements.txt && \
+	python3 -m uv pip install --prefix=/install ./requirements/*.whl
 
 
 ## Here is the base image:
