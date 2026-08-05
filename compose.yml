@@ -28,7 +28,7 @@ services:
     image: redteamsubnet61/bv-bot-runner:latest
     platform: linux/amd64
     build:
-      context: ./src/modules/rest.mdm-sn-container-runner
+      context: ./src/modules/bv-bot-runner
     restart: unless-stopped
     networks:
       - bot-virus-challenge-net
@@ -52,7 +52,7 @@ services:
   bot-runner-dind:
     image: redteamsubnet61/bot_virus_bot_runner_dind:latest
     build:
-      context: ./src/modules/rest.mdm-sn-container-runner
+      context: ./src/modules/bv-bot-runner
       dockerfile: Dockerfile.dind
     restart: unless-stopped
     networks:

@@ -14,7 +14,7 @@ The default Compose stack starts three services:
 | `bot-runner` | Container Runner: builds and executes submitted miner containers for the challenge API. |
 | `bot-runner-dind` | Docker-in-Docker daemon used by the Container Runner. |
 
-The challenge API calls the Container Runner internally at `BV_CHALLENGE_API_BOT_RUNNER_URL` (default: `http://bot-runner:8000`). See the [Container Runner README](src/modules/rest.mdm-sn-container-runner/README.md) for its operational contract.
+The challenge API calls the Container Runner internally at `BV_CHALLENGE_API_BOT_RUNNER_URL` (default: `http://bot-runner:8000`). See the [Container Runner README](src/modules/bv-bot-runner/README.md) for its operational contract.
 
 ## Quick start
 
@@ -113,8 +113,8 @@ pip install -e .[dev]
 pre-commit install
 ```
 
-- [Container Runner operations](src/modules/rest.mdm-sn-container-runner/README.md)
-- [Container Runner tests](src/modules/rest.mdm-sn-container-runner/docs/TESTING.md)
+- [Container Runner operations](src/modules/bv-bot-runner/README.md)
+- [Container Runner tests](src/modules/bv-bot-runner/docs/TESTING.md)
 - [Miner commit example](examples/miner_commit/README.md)
 - [Score submission skill](skills/bv-score-submission/SKILL.md)
 - [Release notes](docs/release-notes.md)
