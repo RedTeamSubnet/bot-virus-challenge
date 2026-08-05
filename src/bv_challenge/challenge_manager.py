@@ -12,7 +12,7 @@ from redteam_core.validator.models import MinerChallengeInfo
 
 class BVChallengeManager(ChallengeManager):
 
-    def __init__(self, challenge_info: dict, metagraph: bt.metagraph):
+    def __init__(self, challenge_info: dict, metagraph: bt.Metagraph):
         super().__init__(challenge_info, metagraph)
 
         emission_config = self.challenge_info.get("emission_config", {})
