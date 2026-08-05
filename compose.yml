@@ -25,7 +25,7 @@ services:
     ports:
       - "${BV_CHALLENGE_API_PORT:-10001}:${BV_CHALLENGE_API_PORT:-10001}"
   bot-runner:
-    image: redteamsubnet61/bot_virus_bot_runner:latest
+    image: redteamsubnet61/bv-bot-runner:latest
     platform: linux/amd64
     build:
       context: ./src/modules/rest.mdm-sn-container-runner
