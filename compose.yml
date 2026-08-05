@@ -1,6 +1,6 @@
 services:
   challenge-api:
-    image: redteamsubnet61/rest-bv-challenge:0.0.0
+    image: redteamsubnet61/rest-bv-challenge:0.0.1
     build:
       context: ./src/bv_challenge/challenge
     platform: linux/amd64
@@ -23,7 +23,6 @@ services:
       - "./volumes/storage/rest-bv-challenge/data:${BV_CHALLENGE_API_DATA_DIR:-/var/lib/rest-bv-challenge}"
     ports:
       - "${BV_CHALLENGE_API_PORT:-10001}:${BV_CHALLENGE_API_PORT:-10001}"
-
   bot-runner:
     image: redteamsubnet61/bot_virus_bot_runner:latest
     platform: linux/amd64
@@ -49,7 +48,6 @@ services:
       - "./src/bv_challenge/challenge/commit:/commit"
     ports:
       - "${VM_RUNNER_API_PORT:-8000}:${VM_RUNNER_API_PORT:-8000}"
-
   bot-runner-dind:
     image: redteamsubnet61/bot_virus_bot_runner_dind:latest
     build:
@@ -66,7 +64,6 @@ services:
       - "bot-runner-dind-socket:/docker-socket"
       - "bot-runner-dind-data:/var/lib/docker"
       - "./src/bv_challenge/challenge/commit:/commit:ro"
-
 networks:
   bot-virus-challenge-net:
     name: bot-virus-challenge-net
