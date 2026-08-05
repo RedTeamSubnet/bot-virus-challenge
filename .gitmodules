@@ -1,9 +1,3 @@
 [submodule "src/modules/rest.mdm-sn-container-runner"]
 	path = src/modules/rest.mdm-sn-container-runner
-	url = git@github.com:RedTeamSubnet/rest.hb-bot-executer.git
-[submodule "src/modules/rt_score"]
-	path = src/modules/rt_score
-	url = https://github.com/RedTeamSubnet/module-rt-score.git
-[submodule "src/modules/web-app"]
-	path = src/modules/web-app
-	url = https://github.com/RedTeamSubnet/web-rt-hb-login-page.git
+	url = https://github.com/RedTeamSubnet/rest.bv-bot-executer.git
