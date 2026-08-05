@@ -1,193 +1,105 @@
 # Bot Virus Challenge
 
-This is a RedTeam Subnet's bot virus challenge repository.
+Bot Virus Challenge is a RedTeam Subnet evaluation service for miner-supplied bot submissions. It builds a submitted miner image, runs it through the configured bot checks, and returns scoring feedback.
 
-Documentation page: <https://docs.theredteam.io/latest/challenges/bot-virus-challenge>
+Canonical product docs: <https://docs.theredteam.io/latest/challenges/bot-virus-challenge>.
 
-## ✨ Features
+## Components
 
-- RedTeam Subnet challenge
-- Challenge module (Python package)
-- Challenge controller and manager
-- Challenge API (FastAPI)
+The default Compose stack starts three services:
 
----
+| Component | Role |
+| --- | --- |
+| `challenge-api` | Public challenge API: supplies tasks, accepts miner outputs, coordinates evaluation, and returns results. |
+| `bot-runner` | Container Runner: builds and executes submitted miner containers for the challenge API. |
+| `bot-runner-dind` | Docker-in-Docker daemon used by the Container Runner. |
 
-## 🐤 Getting Started
+The challenge API calls the Container Runner internally at `BV_CHALLENGE_API_BOT_RUNNER_URL` (default: `http://bot-runner:8000`). See the [Container Runner README](src/modules/rest.mdm-sn-container-runner/README.md) for its operational contract.
 
-### 1. 🚧 Prerequisites
+## Quick start
 
-- Install [**docker** and **docker compose**](https://docs.docker.com/engine/install)
-    - Docker image: [**redteamsubnet61/rest-bv-challenge**](https://hub.docker.com/r/redteamsubnet61/rest-bv-challenge)
-
-[OPTIONAL] For **DEVELOPMENT** environment:
-
-- Install **Python (>= v3.10)** and **pip (>= 23)**:
-    - **[RECOMMENDED] [Miniconda (v3)](https://www.anaconda.com/docs/getting-started/miniconda/install)**
-    - *[arm64/aarch64] [Miniforge (v3)](https://github.com/conda-forge/miniforge)*
-    - *[Python virtual environment] [venv](https://docs.python.org/3/library/venv.html)*
-- Install [**git**](https://git-scm.com/downloads)
-- Setup an [**SSH key**](https://docs.github.com/en/github/authenticating-to-github/connecting-to-github-with-ssh)
-
-### 2. 📥 Download or clone the repository
-
-**2.1.** Prepare projects directory (if not exists):
+Prerequisites: Docker Engine and Docker Compose. Python 3.10+ is needed only for local development.
 
 ```sh
-# Create projects directory:
-mkdir -pv ~/workspaces/projects
-
-# Enter into projects directory:
-cd ~/workspaces/projects
+git clone https://github.com/RedTeamSubnet/bot-virus-challenge.git
+cd bot-virus-challenge
+cp .env.example .env
+./compose.sh validate
+./compose.sh start -l
 ```
 
-**2.2.** Follow one of the below options **[A]**, **[B]** or **[C]**:
-
-**OPTION A.** Clone the repository:
+Equivalent Compose commands:
 
 ```sh
-git clone https://github.com/RedTeamSubnet/bot-virus-challenge.git && \
-    cd bot-virus-challenge
+docker compose config
+docker compose up -d --remove-orphans --force-recreate
+docker compose logs -f -n 100
 ```
 
-**OPTION B.** Clone the repository (for **DEVELOPMENT**: git + ssh key):
+The default public API port is `10001`.
 
 ```sh
-git clone git@github.com:RedTeamSubnet/bot-virus-challenge.git && \
-    cd bot-virus-challenge
+curl -s http://localhost:10001/health | jq
+curl -s http://localhost:10001/openapi.json | jq
 ```
 
-**OPTION C.** Download source code:
+- Swagger UI: <http://localhost:10001/docs>
+- ReDoc: <http://localhost:10001/redoc>
+- OpenAPI JSON: <http://localhost:10001/openapi.json>
 
-1. Download archived **zip** or **tar.gz** file from [**releases**](https://github.com/RedTeamSubnet/bot-virus-challenge/releases).
-2. Extract it into the projects directory.
-3. Enter into the project directory.
-
-#### [OPTIONAL] Install dependencies (for **DEVELOPMENT** environment)
+Stop the stack when finished:
 
 ```sh
-# For DEVELOPMENT environment, install dependencies with pip:
+./compose.sh stop
+# or: docker compose down --remove-orphans
+```
+
+## Configuration
+
+Copy `.env.example` before changing values. Keep secrets and deployment-specific values outside version control.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `BV_CHALLENGE_API_PORT` | `10001` | Public challenge API port. |
+| `BV_CHALLENGE_API_BOT_RUNNER_URL` | `http://bot-runner:8000` | Container Runner URL as seen by `challenge-api`. |
+| `BV_CHALLENGE_API_BOT_RUNNER_SESSION_COUNT` | `2` | Number of web-session checks requested from the runner. |
+| `BV_CHALLENGE_API_BOT_RUNNER_REQUEST_TIMEOUT_SEC` | `900` | Controller-to-runner request timeout. |
+| `MDM_CHALLENGE_BASE_URL` | `http://challenge-api:10001` | Challenge API base URL as seen by the runner. |
+| `VM_RUNNER_API_PORT` | `8000` | Container Runner port. |
+
+For host-local development, use `http://localhost:10001` where a runner process cannot resolve the Compose service name. For the full Compose stack, retain the service-name defaults.
+
+## Miner evaluation workflow
+
+1. A miner retrieves the task from `GET /task`.
+2. The miner produces the required output and sends it to `POST /score` together with the corresponding task input.
+3. The challenge API asks the Container Runner to build the supplied bot/Dockerfile, run the simple-bot gate when enabled, then run configured challenge-web sessions when enabled.
+4. The miner or operator reads the latest feedback from `GET /result`.
+
+Use Swagger for exact request and response schemas; they are versioned with the running API. Basic discovery calls:
+
+```sh
+curl -s http://localhost:10001/task | jq
+curl -s http://localhost:10001/result | jq
+```
+
+`POST /score` requires the `miner_input` and `miner_output` models returned/defined by the API. Do not hand-copy stale payload shapes: use `/docs` or `/openapi.json` from the deployed version.
+
+## Operations and troubleshooting
+
+- A failed build, simple-bot gate, web session, or runner request is reflected in the score according to the challenge configuration. Inspect `challenge-api` and `bot-runner` logs together when diagnosing it.
+- The runner needs access to the shared commit directory, its Docker socket, and the configured Docker networks. A missing mount/network commonly appears as a build or run failure.
+- The runner API can build and run untrusted containers. Keep it on a controlled network when possible. If exposed outside that network, place it behind appropriate network controls and an authentication gateway.
+- Validate configuration before rollout with `./compose.sh validate`; check service readiness with `/health` and inspect logs via `./compose.sh logs -f`.
+
+## Development and references
+
+```sh
 pip install -e .[dev]
-# Install pre-commit hooks:
 pre-commit install
 ```
 
-### 3. 🌎 Configure environment variables
-
-[NOTE] Please, check **[environment variables](#-environment-variables)** section for more details.
-
-```sh
-# Copy '.env.example' file to '.env' file:
-cp -v ./.env.example ./.env
-# Edit environment variables to fit in your environment:
-nano ./.env
-```
-
-### 4. 🏁 Start the server
-
-```sh
-## OPTIONAL: Configure 'compose.override.yml' file.
-# For DEVELOPMENT environment:
-cp -v ./templates/compose/compose.override.dev.yml ./compose.override.yml
-# Edit 'compose.override.yml' file to fit in your environment:
-nano ./compose.override.yml
-
-## 1. Check docker compose configuration is valid:
-./compose.sh validate
-# Or:
-docker compose config
-
-## 2. Start docker compose:
-./compose.sh start -l
-# Or:
-docker compose up -d --remove-orphans --force-recreate && \
-    docker compose logs -f -n 100
-```
-
-### 5. ✅ Check server is running
-
-Check with CLI (curl):
-
-```sh
-# Send a ping request with 'curl' to REST API server and parse JSON response with 'jq':
-curl -s http://localhost:10001/ping | jq
-```
-
-Check with web browser:
-
-- Health check: <http://localhost:10001/health>
-- Swagger: <http://localhost:10001/docs>
-- Redoc: <http://localhost:10001/redoc>
-- OpenAPI JSON: <http://localhost:10001/openapi.json>
-
-### 6. 🛑 Stop the server
-
-Docker runtime:
-
-```sh
-# Stop docker compose:
-./compose.sh stop
-# Or:
-docker compose down --remove-orphans
-```
-
-👍
-
----
-
-## ⚙️ Configuration
-
-### 🌎 Environment Variables
-
-[**`.env.example`**](./.env.example):
-
-```sh
-## --- Environment variable --- ##
-ENV=LOCAL
-DEBUG=false
-# TZ=Asia/Seoul
-# PYTHONDONTWRITEBYTECODE=1
-
-
-## -- API configs -- ##
-BV_CHALLENGE_API_PORT=10001
-# BV_CHALLENGE_API_CONFIGS_DIR="/etc/rest-bv-challenge"
-# BV_CHALLENGE_API_LOGS_DIR="/var/log/rest-bv-challenge"
-# BV_CHALLENGE_API_DATA_DIR="/var/lib/rest-bv-challenge"
-# BV_CHALLENGE_API_TMP_DIR="/tmp/rest-bv-challenge"
-# BV_CHALLENGE_API_VERSION="1"
-# BV_CHALLENGE_API_PREFIX=""
-# BV_CHALLENGE_API_DOCS_ENABLED=true
-# BV_CHALLENGE_API_DOCS_OPENAPI_URL="{api_prefix}/openapi.json"
-# BV_CHALLENGE_API_DOCS_DOCS_URL="{api_prefix}/docs"
-# BV_CHALLENGE_API_DOCS_REDOC_URL="{api_prefix}/redoc"
-```
-
----
-
-## 🏗️ Build Docker Image
-
-Before building the docker image, make sure you have installed **docker** and **docker compose**.
-
-To build the docker image, run the following command:
-
-```sh
-# Build docker image:
-./scripts/build.sh
-# Or:
-docker compose build
-```
-
-## 📚 Documentation
-
-- <https://docs.theredteam.io/latest/challenges>
-
----
-
-## 📑 References
-
-- RedTeam Subnet: <https://www.theredteam.io>
-- Bittensor: <https://www.bittensor.com>
-- FastAPI - <https://fastapi.tiangolo.com>
-- Docker - <https://docs.docker.com>
-- Docker Compose - <https://docs.docker.com/compose>
+- [Container Runner operations](src/modules/rest.mdm-sn-container-runner/README.md)
+- [Container Runner tests](src/modules/rest.mdm-sn-container-runner/docs/TESTING.md)
+- [Miner commit example](examples/miner_commit/README.md)
+- [Release notes](docs/release-notes.md)
