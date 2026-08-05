@@ -43,8 +43,8 @@ services:
       - path: .env
         required: false
     volumes:
-      - "./volumes/storage/rest-mdm-sn-container-runner/logs:${VM_RUNNER_API_LOGS_DIR:-/var/log/rest.vm-runner}"
-      - "./volumes/storage/rest-mdm-sn-container-runner/data:${VM_RUNNER_API_DATA_DIR:-/var/lib/rest.vm-runner}"
+      - "./volumes/storage/rest-mdm-sn-container-runner/logs:${VM_RUNNER_API_LOGS_DIR:-/var/log/rest.bv-vm-runner}"
+      - "./volumes/storage/rest-mdm-sn-container-runner/data:${VM_RUNNER_API_DATA_DIR:-/var/lib/rest.bv-vm-runner}"
       - "bot-runner-dind-socket:/docker-socket"
       - "./src/bv_challenge/challenge/commit:/commit"
     ports:
