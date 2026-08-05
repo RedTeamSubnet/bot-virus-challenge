@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, SecretStr
 from pydantic_settings import SettingsConfigDict
 
 from api.core.constants import ENV_PREFIX
@@ -21,6 +21,7 @@ class ChallengeConfig(FrozenBaseConfig):
     vm_endpoint: str = Field(...)
     vm_timeout: int = Field(default=120, ge=1)
     vm_ssl_verify: bool = Field(default=True)
+    api_key: SecretStr = Field(..., min_length=8, max_length=128)
 
     @model_validator(mode="after")
     def validate_enabled_checks(self) -> "ChallengeConfig":

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from api.core.responses import BaseResponse
@@ -11,6 +11,7 @@ from api.endpoints.challenge.schemas import (
     RandomValRequest,
 )
 from api.endpoints.challenge import service
+from api.core.dependencies.auth import auth_api_key
 from api.logger import logger
 
 router = APIRouter(tags=["Challenge"])
@@ -51,6 +52,7 @@ def get_task(request: Request):
     description="This endpoint score miner output.",
     response_class=JSONResponse,
     responses={400: {}, 422: {}},
+    dependencies=[Depends(auth_api_key)],
 )
 def post_score(
     request: Request,
