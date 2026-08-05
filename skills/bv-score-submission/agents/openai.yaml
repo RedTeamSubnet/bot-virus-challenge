@@ -1,0 +1,4 @@
+interface:
+  display_name: "Submit Bot Virus Score"
+  short_description: "Submit local bot code to the Bot Virus Challenge score API."
+  default_prompt: "Submit the bot.py and Dockerfile from this repository to its /score endpoint."

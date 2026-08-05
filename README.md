@@ -61,6 +61,7 @@ Copy `.env.example` before changing values. Keep secrets and deployment-specific
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `BV_CHALLENGE_API_PORT` | `10001` | Public challenge API port. |
+| `BV_CHALLENGE_API_KEY` | required | API key required by `POST /score`; use 9–128 alphanumeric or hyphen characters. |
 | `BV_CHALLENGE_API_BOT_RUNNER_URL` | `http://bot-runner:8000` | Container Runner URL as seen by `challenge-api`. |
 | `BV_CHALLENGE_API_BOT_RUNNER_SESSION_COUNT` | `2` | Number of web-session checks requested from the runner. |
 | `BV_CHALLENGE_API_BOT_RUNNER_REQUEST_TIMEOUT_SEC` | `900` | Controller-to-runner request timeout. |
@@ -72,7 +73,7 @@ For host-local development, use `http://localhost:10001` where a runner process 
 ## Miner evaluation workflow
 
 1. A miner retrieves the task from `GET /task`.
-2. The miner produces the required output and sends it to `POST /score` together with the corresponding task input.
+2. The miner produces the required output and sends it to `POST /score` together with the corresponding task input and an API key.
 3. The challenge API asks the Container Runner to build the supplied bot/Dockerfile, run the simple-bot gate when enabled, then run configured challenge-web sessions when enabled.
 4. The miner or operator reads the latest feedback from `GET /result`.
 
@@ -84,6 +85,19 @@ curl -s http://localhost:10001/result | jq
 ```
 
 `POST /score` requires the `miner_input` and `miner_output` models returned/defined by the API. Do not hand-copy stale payload shapes: use `/docs` or `/openapi.json` from the deployed version.
+
+### Score API authentication
+
+`POST /score` requires `X-API-Key`; `GET /task`, `GET /result`, health, and documentation endpoints remain unauthenticated. Set a strong value in `BV_CHALLENGE_API_KEY` before starting the service and distribute it only to authorized score clients.
+
+```sh
+curl -sS -X POST http://localhost:10001/score \
+  -H "X-API-Key: $BV_CHALLENGE_API_KEY" \
+  -H 'Content-Type: application/json' \
+  --data @score-payload.json | jq
+```
+
+The API returns `401` for a missing or invalid key. Keys must be 9–128 characters and contain only letters, digits, and hyphens. Keep the key in an environment variable or secret manager; never put it in a committed payload, URL, or shell history.
 
 ## Operations and troubleshooting
 
@@ -102,4 +116,5 @@ pre-commit install
 - [Container Runner operations](src/modules/rest.mdm-sn-container-runner/README.md)
 - [Container Runner tests](src/modules/rest.mdm-sn-container-runner/docs/TESTING.md)
 - [Miner commit example](examples/miner_commit/README.md)
+- [Score submission skill](skills/bv-score-submission/SKILL.md)
 - [Release notes](docs/release-notes.md)
