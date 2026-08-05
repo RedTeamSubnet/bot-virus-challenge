@@ -10,7 +10,7 @@ from redteam_core.validator.challenge_manager import ChallengeManager
 from redteam_core.validator.models import MinerChallengeInfo
 
 
-class MyChallengeManager(ChallengeManager):
+class BVChallengeManager(ChallengeManager):
 
     def __init__(self, challenge_info: dict, metagraph: bt.metagraph):
         super().__init__(challenge_info, metagraph)

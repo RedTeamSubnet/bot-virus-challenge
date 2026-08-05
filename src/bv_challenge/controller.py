@@ -4,7 +4,7 @@ from redteam_core.challenge_pool.controller import Controller
 from redteam_core.validator.models import MinerChallengeCommit
 
 
-class MyController(Controller):
+class BVController(Controller):
 
     def __init__(
         self,
