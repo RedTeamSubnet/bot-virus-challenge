@@ -19,34 +19,45 @@ class CommitFilePM(BaseModel):
         max_length=64,
         title="File Name",
         description="Name of the file.",
-        examples=["solution.js"],
+        examples=["bot.py", "Dockerfile"],
     )
     content: str = Field(
         ...,
         min_length=2,
         title="File Content",
         description="Content of the file as a string.",
-        examples=["console.log('Challenge accepted!');"],
+        examples=["print('ok')"],
     )
+
+    @field_validator("file_name")
+    @classmethod
+    def _check_file_name(cls, val: str) -> str:
+        if val not in {"bot.py", "Dockerfile"}:
+            raise ValueError("Only bot.py and Dockerfile are allowed")
+        return val
 
 
 class MinerOutput(BaseModel):
     commit_files: list[CommitFilePM] = Field(
         ...,
+        min_length=2,
+        max_length=2,
         title="Commit Files",
-        description="List of Commit files for the challenge.",
+        description="Exactly bot.py and Dockerfile.",
     )
 
     @field_validator("commit_files", mode="after")
     @classmethod
     def _check_commit_files(cls, val: list[CommitFilePM]) -> list[CommitFilePM]:
-        for _miner_file_pm in val:
-            _content_lines = _miner_file_pm.content.splitlines()
-            if len(_content_lines) > 500:
+        names = [item.file_name for item in val]
+        if set(names) != {"bot.py", "Dockerfile"}:
+            raise ValueError("commit_files must contain bot.py and Dockerfile")
+        for item in val:
+            max_lines = 2000 if item.file_name == "bot.py" else 500
+            if len(item.content.splitlines()) > max_lines:
                 raise ValueError(
-                    f"`{_miner_file_pm.file_name}` file contains too many lines, should be <= 500 lines!"
+                    f"{item.file_name} content is too long, max {max_lines} lines are allowed"
                 )
-
         return val
 
 

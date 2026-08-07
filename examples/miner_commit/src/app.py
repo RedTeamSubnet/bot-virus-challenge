@@ -31,7 +31,11 @@ def solve(miner_input: MinerInput = Body(...)) -> MinerOutput:
     try:
         _src_dir = pathlib.Path(__file__).parent.resolve()
         _commit_dir = _src_dir / "commit"
-        _commit_paths: list[Path] = list(_commit_dir.glob("*"))
+        # Challenge API only accepts these two files.
+        _commit_paths: list[Path] = [
+            _commit_dir / "bot.py",
+            _commit_dir / "Dockerfile",
+        ]
 
         _commit_files: list[CommitFilePM] = []
         for _commit_path in _commit_paths:

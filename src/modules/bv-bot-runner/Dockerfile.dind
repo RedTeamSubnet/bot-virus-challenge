@@ -1,0 +1,10 @@
+# syntax=docker/dockerfile:1
+
+FROM docker:dind
+
+RUN apk add --no-cache nginx openssl
+
+COPY --chmod=755 ./scripts/docker/dind-entrypoint.sh /usr/local/bin/dind-entrypoint.sh
+
+ENTRYPOINT ["dind-entrypoint.sh"]
+CMD ["--host=unix:///docker-socket/docker.sock"]

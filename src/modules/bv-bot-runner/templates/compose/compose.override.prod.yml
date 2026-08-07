@@ -1,0 +1,24 @@
+services:
+  vm-runner-api:
+    image: redteamsubnet61/rest.mdm-sn-container-runner:0.0.0-250101
+    # volumes:
+    #   - "api-vscode-server:/home/vm-user/.vscode-server"
+    # deploy:
+    #   replicas: 0
+    #   resources:
+    #     limits:
+    #       cpus: "0.5"
+    #       memory: 512M
+    # command: ["/bin/bash"]
+    # command: ["-b", "uvicorn main:app --host=0.0.0.0 --port=${MDM_PROXY_API_PORT:-8000} --no-access-log --no-server-header --proxy-headers --forwarded-allow-ips='*'"]
+    # healthcheck:
+    #   test: ["CMD-SHELL", "curl -f http://localhost:${MDM_PROXY_API_PORT:-8000}/api/v${MDM_PROXY_API_VERSION:-1}/ping"]
+    #   start_period: 30s
+    #   start_interval: 1s
+    #   interval: 5m
+    #   timeout: 5s
+    #   retries: 3
+
+
+# volumes:
+#   api-vscode-server:
