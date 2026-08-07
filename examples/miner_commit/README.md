@@ -59,6 +59,17 @@ Check with web browser:
 
 ---
 
+## 🔍 Validate Your Submission
+
+Before submitting, check `src/commit/bot.py` against the provided `.ruff.toml`:
+
+```sh
+ruff check --config .ruff.toml src/commit/bot.py
+```
+
+Also send a `GET /solve` request before submission to verify that your
+submission is valid and stays within the provided limits.
+
 ## 🏗️ Build Docker Image
 
 To build the docker image, run the following command:
