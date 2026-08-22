@@ -132,6 +132,27 @@ def score_with_metrics_processor_details(
     processor = metrics_processor or _default_metrics_processor
     if processor is None:
         logger.error("No MetricsProcessor available; returning error score.")
+
+    # --- CDP and Headless Detection ---
+    # Check for common indicators of headless browser automation.
+    # These fields are often present and contain specific flags in automated environments.
+    runtime_integrity = data.get("runtimeIntegrity", {})
+    cdp_signals = data.get("cdpSignals", {})
+
+    # Check for navigator.webdriver flag
+    if runtime_integrity.get("navigator", {}).get("webdriver") is True:
+        logger.warning("Detected navigator.webdriver flag in runtimeIntegrity.")
+        # Return a score of 0.0 for detected automation
+        return 0.0, {"automation_detection": 0.0}
+
+    # Add more checks for specific CDP signals or other automation artifacts if known.
+    # Example: checking for specific CDP domains or methods that are indicative of automation.
+    # For instance, if 'Page.getWebDriver' or similar methods are exposed in cdpSignals.
+    # This is a placeholder for more specific detection logic if needed.
+    # if 'Page' in cdp_signals and 'getWebDriver' in cdp_signals['Page']:
+    #     logger.warning("Detected specific CDP signal indicative of automation.")
+    #     return 0.0, {"automation_detection": 0.0}
+    # --- End CDP and Headless Detection ---
         return error_score, {}
 
     try:
