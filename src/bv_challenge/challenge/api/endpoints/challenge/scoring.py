@@ -79,7 +79,7 @@ def validate_shape(data: Any) -> tuple[bool, str | None]:
     if not isinstance(data, dict):
         return False, "payload is not an object"
 
-    if str(data.get("schemaVersion")) != "2":
+    if not isinstance(data.get("schemaVersion"), int) or data.get("schemaVersion") != 2:
         return False, "unsupported schemaVersion"
 
     for _field in _REQUIRED_LIST_FIELDS:
@@ -93,11 +93,11 @@ def validate_shape(data: Any) -> tuple[bool, str | None]:
             return False, f"field is not an object: {_field}"
 
     for _field in _OPTIONAL_LIST_FIELDS:
-        if _field in data and not isinstance(data[_field], list):
+        if _field in data and data[_field] is not None and not isinstance(data[_field], list):
             return False, f"field is not a list: {_field}"
 
     for _field in _OPTIONAL_DICT_FIELDS:
-        if _field in data and not isinstance(data[_field], dict):
+        if _field in data and not isinstance(data[_field], dict) and data[_field] is not None:
             return False, f"field is not an object: {_field}"
 
     # browserInfo is an object when present, but may legitimately be null when the
