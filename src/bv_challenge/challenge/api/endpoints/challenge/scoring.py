@@ -79,13 +79,13 @@ def validate_shape(data: Any) -> tuple[bool, str | None]:
     if not isinstance(data, dict):
         return False, "payload is not an object"
 
-    if str(data.get("schemaVersion")) != "2":
+    if data.get("schemaVersion") != "2":
         return False, "unsupported schemaVersion"
 
     for _field in _REQUIRED_LIST_FIELDS:
         if _field not in data:
             return False, f"missing required field: {_field}"
-        if not isinstance(data[_field], list):
+        if not isinstance(data.get(_field), list):
             return False, f"field is not a list: {_field}"
 
     for _field in _REQUIRED_V2_DICT_FIELDS:
@@ -93,17 +93,17 @@ def validate_shape(data: Any) -> tuple[bool, str | None]:
             return False, f"field is not an object: {_field}"
 
     for _field in _OPTIONAL_LIST_FIELDS:
-        if _field in data and not isinstance(data[_field], list):
+        if _field in data and not isinstance(data.get(_field), list):
             return False, f"field is not a list: {_field}"
 
     for _field in _OPTIONAL_DICT_FIELDS:
-        if _field in data and not isinstance(data[_field], dict):
+        if _field in data and not isinstance(data.get(_field), dict):
             return False, f"field is not an object: {_field}"
 
     # browserInfo is an object when present, but may legitimately be null when the
     # environment snapshot was unavailable in the browser.
-    if "browserInfo" in data and data["browserInfo"] is not None:
-        if not isinstance(data["browserInfo"], dict):
+    if "browserInfo" in data and data.get("browserInfo") is not None:
+        if not isinstance(data.get("browserInfo"), dict):
             return False, "field is not an object: browserInfo"
 
     return True, None
