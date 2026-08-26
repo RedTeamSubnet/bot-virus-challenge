@@ -6,6 +6,14 @@ hide:
 
 # 📌 Release Notes
 
+## v1.0.4 (2026-08-26)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+
+
+**Full Changelog**: https://github.com/RedTeamSubnet/bot-virus-challenge/compare/v1.0.3...v1.0.4
+
 ## v1.0.3 (2026-08-09)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
