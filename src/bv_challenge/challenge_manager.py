@@ -102,7 +102,7 @@ class BVChallengeManager(ChallengeManager):
 
             if miner_commit.accepted and miner_commit.encrypted_commit:
                 bt.logging.info(
-                    f"[CHALLENGE MANAGER - MyChallengeManager] Adding miner commit `{miner_commit.miner_uid}` "
+                    f"[CHALLENGE MANAGER - BVChallengeManager] Adding miner commit `{miner_commit.miner_uid}` "
                     "to unique commit set."
                 )
                 self._try_add_unique_commit(
@@ -258,5 +258,5 @@ class BVChallengeManager(ChallengeManager):
 
 
 __all__ = [
-    "MyChallengeManager",
+    "BVChallengeManager",
 ]

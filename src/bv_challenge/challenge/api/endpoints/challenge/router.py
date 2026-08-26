@@ -56,7 +56,6 @@ def get_task(request: Request):
 )
 def post_score(
     request: Request,
-    miner_input: MinerInput,
     miner_output: MinerOutput,
 ):
 
