@@ -1,6 +1,6 @@
 challenge:
   n_run_per_ch: 10
-  bot_timeout: 200
+  bot_timeout: 100
   # Layer 1/2 fallback score policy
   gate_fail_score: 0.0
   metrics_processor_error_score: 0.5
