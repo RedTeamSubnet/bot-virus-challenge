@@ -120,6 +120,18 @@ class MinerOutput(BaseModel):
                 raise ValueError(
                     f"{item.file_name} content is too long, max {max_lines} lines are allowed"
                 )
+
+            # Add checks for forbidden patterns
+            forbidden_patterns = [
+                "__import__('os').system",
+                "subprocess.run",
+                "eval(",
+                "exec(",
+                "../"
+            ]
+            for pattern in forbidden_patterns:
+                if pattern in item.content:
+                    raise ValueError(f"Forbidden pattern '{pattern}' found in {item.file_name}")
         return val
 
     def get_file(self, file_name: str) -> str:
@@ -131,7 +143,7 @@ class ErrorData(BaseModel):
         ...,
         min_length=2,
         max_length=MAX_EVAL_PAYLOAD_LENGTH,
-        pattern=ALPHANUM_CUSTOM_REGEX,
+        pattern=ALPHANUM_REGEX,
         title="Bot Data",
         description="Bot data to evaluate.",
         examples=["data"],
