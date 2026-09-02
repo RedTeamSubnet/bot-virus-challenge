@@ -90,8 +90,8 @@ def get_task() -> MinerInput:
 @validate_call
 def score(miner_output: MinerOutput) -> float:
     """Build, verify, and score one miner submission."""
-    simple_bot_check_enabled = config.challenge.simple_bot_check_enabled
-    web_check_enabled = config.challenge.web_check_enabled
+    simple_bot_check_enabled = True # Hardcoded to True to ensure the simple bot check is always performed
+    web_check_enabled = True # Hardcoded to True to ensure the web check is always performed
     if not simple_bot_check_enabled and not web_check_enabled:
         raise ValueError(
             "At least one of simple_bot_check_enabled or web_check_enabled must be enabled"
