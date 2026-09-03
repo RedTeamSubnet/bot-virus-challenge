@@ -13,7 +13,7 @@ REQUEST_ID_REGEX = (
     r"\b[0-9a-fA-F]{32}\b"
 )
 
-ALPHANUM_CUSTOM_REGEX = r"^[0-9a-zA-Z_\-:+/=]+$"
+ALPHANUM_CUSTOM_REGEX = r"^[0-9a-zA-Z_]+$"
 REQUIREMENTS_REGEX = r"^[0-9a-zA-Z_\-.,\[\]!<>=~]+$"
 
 HTTP_METHOD_REGEX = r"^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT|TRACE|\*)$"
