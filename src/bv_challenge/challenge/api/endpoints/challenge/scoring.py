@@ -16,7 +16,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-METRICS_PROCESSOR_ERROR_SCORE = 0.5
+METRICS_PROCESSOR_ERROR_SCORE = 0.0
 
 try:
     from rt_bv_score import MetricsProcessor as _default_metrics_processor
