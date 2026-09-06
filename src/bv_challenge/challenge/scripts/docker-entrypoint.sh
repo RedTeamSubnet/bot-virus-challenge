@@ -7,6 +7,11 @@ echo "[INFO]: Running '${BV_CHALLENGE_API_SLUG}' docker-entrypoint.sh..."
 
 _run()
 {
+	# Run as the app user, so this proves the identity that will actually use
+	# the socket can reach it, not just that root can.
+	echo "[INFO]: Waiting for the Docker daemon..."
+	gosu "${USER}:${GROUP}" python -m api.endpoints.challenge.docker_client || exit 2
+
 	echo "[INFO]: Starting FastAPI server..."
 	exec gosu "${USER}:${GROUP}" python -m api || exit 2
 	# exec gosu "${USER}:${GROUP}" uvicorn api.main:app \
