@@ -6,7 +6,9 @@ challenge:
   metrics_processor_error_score: 0.5
   session_timeout_score: 0.0
   runner_fail_score: 0.0
-  # VM configuration for remote Docker build/run
-  vm_endpoint: "http://bot-runner:8000"
-  vm_timeout: 300
-  vm_ssl_verify: false
+  # Bot container lifecycle, run by this service against the DinD sidecar.
+  commit_dir: "/commit"
+  miner_image_tag: "redteamsubnet/bv-miner:latest"
+  challenge_network_name: "bot-challenge-network"
+  container_run_timeout_sec: 10
+  container_wait_timeout_sec: 900

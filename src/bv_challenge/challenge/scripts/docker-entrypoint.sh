@@ -5,8 +5,28 @@ set -euo pipefail
 echo "[INFO]: Running '${BV_CHALLENGE_API_SLUG}' docker-entrypoint.sh..."
 
 
+_seed_commit_dir()
+{
+	# The bot build context is a volume shared with the DinD daemon, because it
+	# is the daemon, not this container, that resolves the bot_runner.py bind
+	# mount into the bot. Both sides therefore mount it at the same path. Seed
+	# it from the image on every start: it deliberately is not the repo
+	# checkout, so a scoring run can no longer dirty the working tree.
+	local _commit_dir="${BV_CHALLENGE_COMMIT_DIR:-/commit}"
+	echo "[INFO]: Seeding bot build context at '${_commit_dir}'..."
+	mkdir -p "${_commit_dir}/bot" || exit 2
+	cp -f "${BV_CHALLENGE_API_DIR}/commit/bot_runner.py" "${_commit_dir}/bot_runner.py" || exit 2
+	chown -R "${USER}:${GROUP}" "${_commit_dir}" || exit 2
+	chmod 770 "${_commit_dir}" "${_commit_dir}/bot" || exit 2
+	# Readable by whatever user the miner image runs as, which is not ours.
+	chmod 644 "${_commit_dir}/bot_runner.py" || exit 2
+}
+
+
 _run()
 {
+	_seed_commit_dir
+
 	# Run as the app user, so this proves the identity that will actually use
 	# the socket can reach it, not just that root can.
 	echo "[INFO]: Waiting for the Docker daemon..."
