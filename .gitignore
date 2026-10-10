@@ -548,3 +548,6 @@ private/
 # Rust build artifacts
 target/
 Cargo.lock
+
+## Local task notes (not tracked)
+docs/tasks/
