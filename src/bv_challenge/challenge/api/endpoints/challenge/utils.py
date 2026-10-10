@@ -78,16 +78,6 @@ def send_build_request(
     )
 
 
-def send_run_simple_bot_request(score_job_id: str) -> Dict[str, Any]:
-    return _post_vm_request(
-        "/run-simple-bot",
-        {
-            "score_job_id": score_job_id,
-            "timeout_sec": config.challenge.vm_timeout,
-        },
-    )
-
-
 def send_run_web_request(session_count: int, score_job_id: str) -> Dict[str, Any]:
     return _post_vm_request(
         "/run-web",
@@ -122,7 +112,6 @@ __all__ = [
     "gen_key_pairs",
     "decrypt",
     "send_build_request",
-    "send_run_simple_bot_request",
     "send_run_web_request",
     "run_web_phase",
 ]

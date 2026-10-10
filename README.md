@@ -74,7 +74,7 @@ For host-local development, use `http://localhost:10001` where a runner process 
 
 1. A miner retrieves the task from `GET /task`.
 2. The miner produces the required output and sends it to `POST /score` together with the corresponding task input and an API key.
-3. The challenge API asks the Container Runner to build the supplied bot/Dockerfile, run the simple-bot gate when enabled, then run configured challenge-web sessions when enabled.
+3. The challenge API asks the Container Runner to build the supplied bot/Dockerfile, then run the configured challenge-web sessions.
 4. The miner or operator reads the latest feedback from `GET /result`.
 
 Use Swagger for exact request and response schemas; they are versioned with the running API. Basic discovery calls:
@@ -101,7 +101,7 @@ The API returns `401` for a missing or invalid key. Keys must be 9–128 charact
 
 ## Operations and troubleshooting
 
-- A failed build, simple-bot gate, web session, or runner request is reflected in the score according to the challenge configuration. Inspect `challenge-api` and `bot-runner` logs together when diagnosing it.
+- A failed build, web session, or runner request is reflected in the score according to the challenge configuration. Inspect `challenge-api` and `bot-runner` logs together when diagnosing it.
 - The runner needs access to the shared commit directory, its Docker socket, and the configured Docker networks. A missing mount/network commonly appears as a build or run failure.
 - The runner API can build and run untrusted containers. Keep it on a controlled network when possible. If exposed outside that network, place it behind appropriate network controls and an authentication gateway.
 - Validate configuration before rollout with `./compose.sh validate`; check service readiness with `/health` and inspect logs via `./compose.sh logs -f`.

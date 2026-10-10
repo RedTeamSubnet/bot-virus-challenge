@@ -25,13 +25,12 @@ payload_manager = PayloadManager()
 _latest_result_lock = threading.Lock()
 CategoryScores = Dict[str, float]
 FeedbackCategories = Dict[str, str]
-LatestResultValue = Union[float, str, bool, None, FeedbackCategories]
+LatestResultValue = Union[float, str, None, FeedbackCategories]
 
 _latest_result: Dict[str, LatestResultValue] = {
     "score": None,
     "feedback": "",
     "phase": "not_started",
-    "simple_bot_passed": None,
     "category_scores": {},
 }
 SCHEMA_VERSION = "2"
@@ -42,7 +41,6 @@ def _set_latest_result(
     score: float,
     feedback: str,
     phase: str,
-    simple_bot_passed: bool | None,
     category_scores: FeedbackCategories | None = None,
 ) -> None:
     with _latest_result_lock:
@@ -51,7 +49,6 @@ def _set_latest_result(
                 "score": score,
                 "feedback": feedback,
                 "phase": phase,
-                "simple_bot_passed": simple_bot_passed,
                 "category_scores": category_scores or {},
             }
         )
@@ -90,13 +87,6 @@ def get_task() -> MinerInput:
 @validate_call
 def score(miner_output: MinerOutput) -> float:
     """Build, verify, and score one miner submission."""
-    simple_bot_check_enabled = config.challenge.simple_bot_check_enabled
-    web_check_enabled = config.challenge.web_check_enabled
-    if not simple_bot_check_enabled and not web_check_enabled:
-        raise ValueError(
-            "At least one of simple_bot_check_enabled or web_check_enabled must be enabled"
-        )
-
     expected_sessions = config.challenge.n_run_per_ch
     required_tasks = expected_sessions
     score_job_id = uuid.uuid4().hex
@@ -112,46 +102,8 @@ def score(miner_output: MinerOutput) -> float:
                 score=0.0,
                 feedback="failed to build miner container",
                 phase="build",
-                simple_bot_passed=None,
             )
             return 0.0
-
-        simple_bot_passed: bool | None = None
-        if simple_bot_check_enabled:
-            try:
-                simple_result = challenge_utils.send_run_simple_bot_request(score_job_id)
-            except Exception as err:
-                logger.error(f"Simple bot detection phase failed: {err}")
-                _set_latest_result(
-                    score=0.0,
-                    feedback="failed in simple bot detection phase",
-                    phase="simple_bot",
-                    simple_bot_passed=False,
-                )
-                return 0.0
-
-            simple_bot_passed = simple_result.get("passed", True) is True
-            if not simple_bot_passed:
-                logger.info(f"Simple bot detection rejected miner: {simple_result}")
-                _set_latest_result(
-                    score=0.0,
-                    feedback="failed in simple bot detection phase",
-                    phase="simple_bot",
-                    simple_bot_passed=False,
-                )
-                return 0.0
-        else:
-            logger.info("Simple bot detection phase skipped by config")
-
-        if not web_check_enabled:
-            logger.info("Web scoring phase skipped by config")
-            _set_latest_result(
-                score=1.0,
-                feedback="simple bot detection completed; web scoring skipped",
-                phase="simple_bot",
-                simple_bot_passed=simple_bot_passed,
-            )
-            return 1.0
 
         if (
             not payload_manager.has_remaining_tasks()
@@ -182,7 +134,6 @@ def score(miner_output: MinerOutput) -> float:
                 else "web scoring completed"
             ),
             phase="web",
-            simple_bot_passed=simple_bot_passed,
             category_scores=_miner_feedback(category_scores),
         )
         return float(final_score)
@@ -198,12 +149,6 @@ def _short_digest(*parts: str) -> str:
 
 @validate_call(config={"arbitrary_types_allowed": True})
 def get_web(request: Request) -> HTMLResponse:
-    if not config.challenge.web_check_enabled:
-        raise BaseHTTPException(
-            error_enum=ErrorCodeEnum.BAD_REQUEST,
-            message="Web check is disabled",
-        )
-
     nonce, public_key, active = payload_manager.claim_web_key()
     if not active:
         logger.warning(
