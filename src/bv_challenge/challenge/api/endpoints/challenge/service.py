@@ -4,7 +4,7 @@ import hashlib
 import pathlib
 import threading
 import uuid
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 from fastapi import Request
 from fastapi.responses import HTMLResponse
@@ -25,15 +25,18 @@ payload_manager = PayloadManager()
 _latest_result_lock = threading.Lock()
 CategoryScores = Dict[str, float]
 FeedbackCategories = Dict[str, str]
-LatestResultValue = Union[float, str, None, FeedbackCategories]
+LatestResultValue = Union[float, str, bool, None, FeedbackCategories]
 
 _latest_result: Dict[str, LatestResultValue] = {
     "score": None,
     "feedback": "",
     "phase": "not_started",
     "category_scores": {},
+    "gate_passed": None,
+    "gate_reason": None,
 }
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = scoring.SCHEMA_VERSION
+GATE_TIMEOUT_REASON = "timeout"
 
 
 def _set_latest_result(
@@ -42,6 +45,8 @@ def _set_latest_result(
     feedback: str,
     phase: str,
     category_scores: FeedbackCategories | None = None,
+    gate_passed: Optional[bool] = None,
+    gate_reason: Optional[str] = None,
 ) -> None:
     with _latest_result_lock:
         _latest_result.update(
@@ -50,6 +55,8 @@ def _set_latest_result(
                 "feedback": feedback,
                 "phase": phase,
                 "category_scores": category_scores or {},
+                "gate_passed": gate_passed,
+                "gate_reason": gate_reason,
             }
         )
 
@@ -116,11 +123,42 @@ def score(miner_output: MinerOutput) -> float:
                 message="No initialized key pairs, or out of tasks!",
             )
 
-        runner_failed = challenge_utils.run_web_phase(
+        # Smoke session first: one session, inspected before spending the rest.
+        smoke_runner_failed = challenge_utils.run_web_phase(
             payload_manager,
-            session_count=expected_sessions,
+            session_count=1,
             score_job_id=score_job_id,
         )
+        gate_passed: Optional[bool] = None
+        runner_failed = smoke_runner_failed
+        if not smoke_runner_failed:
+            failed_session = payload_manager.first_hard_fail()
+            gate_reason: Optional[str] = None
+            if failed_session is not None:
+                gate_reason = failed_session.hard_fail_reason
+            elif payload_manager.completed_count() < 1:
+                # The bot never submitted the smoke session in time.
+                gate_reason = GATE_TIMEOUT_REASON
+            if failed_session is not None or gate_reason is not None:
+                logger.info(
+                    f"[run {payload_manager.run_id}] Smoke session failed: {gate_reason}"
+                )
+                _set_latest_result(
+                    score=0.0,
+                    feedback="smoke session failed",
+                    phase="gate",
+                    gate_passed=False,
+                    gate_reason=gate_reason,
+                )
+                return 0.0
+            gate_passed = True
+            if expected_sessions > 1:
+                runner_failed = challenge_utils.run_web_phase(
+                    payload_manager,
+                    session_count=expected_sessions - 1,
+                    score_job_id=score_job_id,
+                    target_completed=expected_sessions,
+                )
         final_score = payload_manager.finalize(
             timeout_score=config.challenge.session_timeout_score
         )
@@ -135,6 +173,7 @@ def score(miner_output: MinerOutput) -> float:
             ),
             phase="web",
             category_scores=_miner_feedback(category_scores),
+            gate_passed=gate_passed,
         )
         return float(final_score)
 
@@ -154,6 +193,7 @@ def get_web(request: Request) -> HTMLResponse:
         logger.warning(
             "/_web called with no active session key; serving a throwaway key"
         )
+    task = payload_manager.issue_task(nonce)
     templates = Jinja2Templates(directory=_SRC_DIR / "./templates/html")
     return templates.TemplateResponse(
         request=request,
@@ -168,6 +208,7 @@ def get_web(request: Request) -> HTMLResponse:
                 str(config.api.security.asymmetric.key_size),
             ),
             "schema_version": SCHEMA_VERSION,
+            "task": task,
         },
     )
 
@@ -196,19 +237,21 @@ def get_random_val(nonce: str) -> str:
         return public_key
 
 
-def _score_payload(plain_data: dict) -> tuple[float, Dict[str, float]]:
+def _score_payload(plain_data: dict) -> scoring.ScoreResult:
     try:
         shape_ok, shape_reason = scoring.validate_shape(plain_data)
         if not shape_ok:
             logger.info(f"Layer 1 shape check rejected session: {shape_reason}")
-            return config.challenge.gate_fail_score, {}
-        return scoring.score_with_metrics_processor_details(
+            return scoring.ScoreResult(
+                config.challenge.gate_fail_score, {}, True, "payload"
+            )
+        return scoring.score_with_metrics_processor(
             data=plain_data,
             error_score=config.challenge.metrics_processor_error_score,
         )
     except Exception as err:
         logger.error(f"Unexpected scoring error; recording error score: {err}")
-        return config.challenge.metrics_processor_error_score, {}
+        return scoring.ScoreResult(config.challenge.metrics_processor_error_score, {})
 
 
 @validate_call
@@ -220,7 +263,10 @@ def eval_bot(data: str, trusted_request: dict | None = None) -> None:
         trusted_context=trusted_request,
     )
     if outcome.status == "recorded":
-        logger.info(f"Recorded session {outcome.session_id} score: {outcome.score}")
+        logger.info(
+            f"Recorded session {outcome.session_id} score: {outcome.score}"
+            + (f" (hard fail: {outcome.hard_fail_reason})" if outcome.hard_fail else "")
+        )
     elif outcome.status == "duplicate":
         logger.warning(f"Duplicate /_eval for session {outcome.session_id}")
     else:

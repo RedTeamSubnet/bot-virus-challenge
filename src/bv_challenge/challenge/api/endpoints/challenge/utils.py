@@ -89,9 +89,18 @@ def send_run_web_request(session_count: int, score_job_id: str) -> Dict[str, Any
 
 
 def run_web_phase(
-    manager: "PayloadManager", session_count: int, score_job_id: str
+    manager: "PayloadManager",
+    session_count: int,
+    score_job_id: str,
+    target_completed: int | None = None,
 ) -> bool:
-    """Run the web phase and return whether the runner failed."""
+    """Run the web phase and return whether the runner failed.
+
+    ``target_completed`` is the total number of recorded sessions to wait for
+    (default ``session_count``); a later batch passes the run total because
+    sessions from earlier batches are already counted.
+    """
+    target = session_count if target_completed is None else target_completed
     try:
         logger.info(f"Starting {session_count} bot session(s) via runner")
         send_run_web_request(session_count=session_count, score_job_id=score_job_id)
@@ -100,10 +109,8 @@ def run_web_phase(
         return True
 
     deadline = time.time() + config.challenge.bot_timeout
-    while manager.completed_count() < session_count and time.time() < deadline:
-        logger.info(
-            f"Waiting... {manager.completed_count()}/{session_count} sessions recorded"
-        )
+    while manager.completed_count() < target and time.time() < deadline:
+        logger.info(f"Waiting... {manager.completed_count()}/{target} sessions recorded")
         time.sleep(1)
     return False
 

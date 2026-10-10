@@ -1,155 +1,105 @@
-"""Tests for the /_web challenge page and the browser SDK (HBv6 non-behavioral).
+"""The /_web challenge page: template context and served assets."""
 
-HBv6 scores non-behavioral browser/runtime/session integrity only. The page is
-deliberately minimal: it loads the SDK, which collects integrity signals and
-submits the encrypted payload to /_eval from the browser. There are no form
-fields, no verify button, no scroll content, and no behavioral collection.
-
-Two layers:
-  * Python: the /_web route serves the minimal verification page with the
-    config/session globals the SDK needs, and the SDK assets are served by the
-    static mount.
-  * Node: the SDK behaviour (auto-collect + encrypt + submit) is proven by the
-    standalone JS suites under tests/web/, shelled out here so a single
-    `pytest` run covers the whole browser-side flow. Skipped if node is absent.
-"""
-
-import shutil
+import json
 import pathlib
-import subprocess
+import re
 
-import pytest
 from fastapi.testclient import TestClient
 
 from src.bv_challenge.challenge.api.main import app
+from api.endpoints.challenge import payload_manager as pm_mod
+from api.endpoints.challenge import service
+from api.endpoints.challenge.payload_manager import PayloadManager
+from api.endpoints.challenge.schemas import KeyPairPM
 
 client = TestClient(app)
 
-_WEB_DIR = pathlib.Path(__file__).resolve().parents[1] / "tests" / "web"
+_HTML_DIR = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "src"
+    / "bv_challenge"
+    / "challenge"
+    / "templates"
+    / "html"
+)
+
+
+def _fake_key_pairs() -> list[KeyPairPM]:
+    return [
+        KeyPairPM(
+            private_key=f"private-key-{i}".ljust(40, "x"),
+            public_key=f"public-key-{i}".ljust(40, "x"),
+            nonce=f"nonce{i}abcdef",
+        )
+        for i in range(3)
+    ]
 
 
 def test_web_page_loads() -> None:
-    _response = client.get("/_web")
-    assert _response.status_code == 200
-    assert "text/html" in _response.headers["content-type"]
+    response = client.get("/_web")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
 
 
-def test_web_page_is_minimal_verification_page() -> None:
-    _html = client.get("/_web").text
-    # Minimal status page only.
-    assert "Browser verification" in _html
-    assert "Checking browser environment" in _html
-    assert 'id="status"' in _html
+def test_web_page_exposes_config_and_session_globals() -> None:
+    html = client.get("/_web").text
+    assert "window.TASK_CONFIG" in html
+    assert '"/_eval"' in html
+    assert "window.PUBLIC_KEY" in html
+    assert "window.BV_SESSION" in html
+    for key in ("sessionId", "nonce", "publicKeyId", "configHash", "schemaVersion"):
+        assert key in html, key
 
 
-def test_web_page_has_no_form_or_behavioral_elements() -> None:
-    _html = client.get("/_web").text
-    # No username/password fields, verify button, scroll content, or end button.
-    for _needle in (
-        'name="username"',
-        'name="password"',
-        'id="login-button"',
-        'id="content"',
-        "end-session",
-        "ACTIONS_LIST",
-    ):
-        assert _needle not in _html, _needle
-
-
-def test_web_page_exposes_minimal_task_config() -> None:
-    _html = client.get("/_web").text
-    assert "window.TASK_CONFIG" in _html
-    # Auto-submit is available and enabled.
-    assert '"/_eval"' in _html
-    assert "autoSubmit: true" in _html
-    assert '"data"' in _html
-    # Behavioral selector contract from the old page must be gone.
-    for _key in (
-        "usernameInput",
-        "passwordInput",
-        "verifyButton",
-        "scrollContainer",
-        "endSessionButton",
-    ):
-        assert _key not in _html, _key
-
-
-def test_web_page_exposes_session_binding_globals() -> None:
-    _html = client.get("/_web").text
-    assert "window.BV_SESSION" in _html
-    for _key in ("sessionId", "nonce", "publicKeyId", "configHash", "schemaVersion"):
-        assert _key in _html, _key
-    # Encryption key material the SDK needs for the browser-side submit.
-    assert "window.PUBLIC_KEY" in _html
-
-
-def test_web_page_wires_sdk() -> None:
-    _html = client.get("/_web").text
-    # SDK is wired in (collector before sdk).
-    assert "/static/js/collector.js" in _html
-    assert "/static/js/sdk.js" in _html
+def test_web_page_session_schema_version_is_3() -> None:
+    html = client.get("/_web").text
+    assert re.search(r'schemaVersion:\s*"3"', html)
 
 
 def test_web_page_does_not_leak_scoring_internals() -> None:
-    _html = client.get("/_web").text.lower()
-    for _needle in (
-        "rt_bv_score",
-        "metricsprocessor",
-        "passes_gate",
-        "threshold",
-        "score_message",
-        "self_consistency",
-        "weighted_average",
-        "gate_fail",
-        "penalty",
-    ):
-        assert _needle not in _html
+    html = client.get("/_web").text.lower()
+    for needle in ("rt_bv_score", "metricsprocessor", "score_message", "gate_fail"):
+        assert needle not in html
 
 
-def test_sdk_assets_do_not_leak_scoring_internals() -> None:
-    # The collected raw signals are public, but no scoring math/thresholds may
-    # appear in the shipped JS either.
-    for _path in ("/static/js/collector.js", "/static/js/sdk.js"):
-        _js = client.get(_path).text.lower()
-        for _needle in (
-            "rt_bv_score",
-            "metricsprocessor",
-            "threshold",
-            "weight",
-            "penalty",
-            "score_message",
-            "self_consistency",
-        ):
-            assert _needle not in _js, f"{_needle} leaked into {_path}"
+def test_built_assets_are_served() -> None:
+    manifest = json.loads((_HTML_DIR / "asset-manifest.json").read_text())
+    for name in ("main.js", "main.css"):
+        path = manifest["files"][name]
+        response = client.get(path)
+        assert response.status_code == 200, path
 
 
-def test_sdk_does_not_collect_behavior() -> None:
-    # The active flow must not wire mouse/keyboard/scroll/click behavior.
-    _js = client.get("/static/js/sdk.js").text
-    for _needle in (
-        "mousemove",
-        "mousedown",
-        "mouseup",
-        "keydown",
-        "keyup",
-        "addEventListener",
-    ):
-        assert _needle not in _js, _needle
-
-
-def test_sdk_assets_are_served() -> None:
-    for _path in ("/static/js/collector.js", "/static/js/sdk.js"):
-        _response = client.get(_path)
-        assert _response.status_code == 200, _path
-        assert "javascript" in _response.headers["content-type"].lower()
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
-@pytest.mark.parametrize("script", ["collector.test.js", "sdk.test.js"])
-def test_sdk_node_suites(script: str) -> None:
-    _result = subprocess.run(
-        ["node", str(_WEB_DIR / script)],
-        capture_output=True,
-        text=True,
+def test_get_web_passes_task_and_stores_expected_answer(monkeypatch, tmp_path) -> None:
+    # Own template so the test does not depend on the built page.
+    html_dir = tmp_path / "templates" / "html"
+    html_dir.mkdir(parents=True)
+    (html_dir / "index.html").write_text(
+        '<script>window.N="{{ nonce }}";window.BV_TASK = {{ task | tojson }};</script>'
     )
-    assert _result.returncode == 0, _result.stdout + _result.stderr
+    monkeypatch.setattr(service, "_SRC_DIR", tmp_path)
+    monkeypatch.setattr(pm_mod.challenge_utils, "gen_key_pairs", _fake_key_pairs)
+    manager = PayloadManager()
+    manager.pop_task()
+    monkeypatch.setattr(service, "payload_manager", manager)
+
+    html = client.get("/_web").text
+
+    nonce = re.search(r'window\.N="([^"]+)"', html).group(1)
+    task = json.loads(re.search(r"window\.BV_TASK = (\{.*?\});", html).group(1))
+    assert set(task) == {
+        "seed",
+        "code",
+        "cardCount",
+        "codeCardIndex",
+        "sliderTarget",
+        "sliderTolerance",
+    }
+    assert manager.tasks[nonce] == task
+    assert nonce in manager.sessions
+
+    # Each page load gets its own task bound to its own nonce.
+    html2 = client.get("/_web").text
+    nonce2 = re.search(r'window\.N="([^"]+)"', html2).group(1)
+    assert nonce2 != nonce
+    assert set(manager.tasks) == {nonce, nonce2}

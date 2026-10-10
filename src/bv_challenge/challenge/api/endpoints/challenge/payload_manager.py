@@ -9,6 +9,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from api.core import utils
 from api.config import config
 from api.endpoints.challenge import utils as challenge_utils
+from api.endpoints.challenge.scoring import SCHEMA_VERSION, ScoreResult
+from api.endpoints.challenge.task import (
+    TASK_FAIL_REASON,
+    check_task_answer,
+    generate_task,
+)
 from api.helpers.crypto import asymmetric as asymmetric_helper
 from api.endpoints.challenge.schemas import KeyPairPM
 
@@ -50,7 +56,10 @@ def _stamp_binding_verdict(
     binding["payloadHashMatch"] = supplied_hash == computed_hash
     binding["duplicate"] = duplicate
     binding["expired"] = False
-    binding["schemaMatch"] = str(binding.get("schemaVersion")) == "2"
+    binding["schemaMatch"] = (
+        str(binding.get("schemaVersion")) == SCHEMA_VERSION
+        and str(payload.get("schemaVersion")) == SCHEMA_VERSION
+    )
 
 
 @dataclass
@@ -60,6 +69,8 @@ class SessionRecord:
     category_scores: Dict[str, float] = field(default_factory=dict)
     completed: bool = False
     timed_out: bool = False
+    hard_fail: bool = False
+    hard_fail_reason: Optional[str] = None
 
 
 @dataclass
@@ -68,6 +79,8 @@ class EvalOutcome:
     session_id: Optional[str] = None
     score: Optional[float] = None
     category_scores: Dict[str, float] = field(default_factory=dict)
+    hard_fail: bool = False
+    hard_fail_reason: Optional[str] = None
 
 
 class PayloadManager:
@@ -92,6 +105,33 @@ class PayloadManager:
             if pair.nonce
         }
         self.cur_key_pair: Optional[KeyPairPM] = None
+        # Expected task answers by session nonce. Same lifecycle as the key
+        # pairs: replaced on reset(), only nonces of this run are accepted.
+        self.tasks: Dict[str, Dict[str, Any]] = {}
+
+    def issue_task(self, nonce: str) -> Dict[str, Any]:
+        """Generate the task for a session and remember its expected answer.
+
+        A nonce that does not belong to this run (throwaway page) gets a task
+        but nothing is stored.
+        """
+        task = generate_task(
+            card_count_min=config.challenge.task_card_count_min,
+            card_count_max=config.challenge.task_card_count_max,
+            slider_tolerance=config.challenge.task_slider_tolerance,
+        )
+        with self.claim_lock:
+            if nonce in self.sessions:
+                self.tasks[nonce] = dict(task)
+        return task
+
+    def first_hard_fail(self) -> Optional[SessionRecord]:
+        """The first completed session recorded as a hard fail, if any."""
+        with self.claim_lock:
+            for record in self.sessions.values():
+                if record.completed and record.hard_fail:
+                    return record
+        return None
 
     def pop_task(self) -> Optional[KeyPairPM]:
         if not self.key_pairs:
@@ -136,7 +176,7 @@ class PayloadManager:
         self,
         data: str,
         decrypt_fn: Callable[..., str],
-        score_fn: Callable[[dict], Tuple[float, Dict[str, float]]],
+        score_fn: Callable[[dict], ScoreResult],
         trusted_context: Optional[Dict[str, Optional[str]]] = None,
     ) -> EvalOutcome:
         for session_id, private_key in list(self.private_keys.items()):
@@ -169,15 +209,28 @@ class PayloadManager:
                     if key in {"userAgent", "acceptLanguage", "secChUa"}
                     and isinstance(value, str)
                 }
-                score, category_scores = score_fn(payload)
-                record.score = score
-                record.category_scores = category_scores
+                # Every session must carry a correct answer to its own task,
+                # whatever schema it claims; the scorer only runs after that.
+                if check_task_answer(self.tasks.get(session_id), payload):
+                    result = score_fn(payload)
+                else:
+                    result = ScoreResult(
+                        config.challenge.gate_fail_score, {}, True, TASK_FAIL_REASON
+                    )
+                record.score = result.score
+                record.category_scores = result.category_scores
+                record.hard_fail = bool(result.hard_fail)
+                record.hard_fail_reason = (
+                    result.hard_fail_reason if record.hard_fail else None
+                )
                 record.completed = True
                 return EvalOutcome(
                     status="recorded",
                     session_id=session_id,
-                    score=score,
-                    category_scores=category_scores,
+                    score=result.score,
+                    category_scores=result.category_scores,
+                    hard_fail=record.hard_fail,
+                    hard_fail_reason=record.hard_fail_reason,
                 )
 
         return EvalOutcome(status="unattributable")

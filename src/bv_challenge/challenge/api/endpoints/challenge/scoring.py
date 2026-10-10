@@ -12,11 +12,29 @@ on any failure.
 import logging
 import math
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NamedTuple
 
 logger = logging.getLogger(__name__)
 
 METRICS_PROCESSOR_ERROR_SCORE = 0.5
+
+# The only payload schema the challenge API accepts. Older schemas are
+# rejected here so a client cannot skip the v3 checks by downgrading.
+SCHEMA_VERSION = "3"
+
+# Coarse hard-fail reason codes (shared contract). Nothing finer is exposed.
+HARD_FAIL_REASONS = frozenset(
+    {"automation", "integrity", "realm_mismatch", "untrusted_input", "payload", "task"}
+)
+
+
+class ScoreResult(NamedTuple):
+    """Outcome of scoring one session."""
+
+    score: float
+    category_scores: dict[str, float]
+    hard_fail: bool = False
+    hard_fail_reason: str | None = None
 
 try:
     from rt_bv_score import MetricsProcessor as _default_metrics_processor
@@ -57,7 +75,7 @@ _OPTIONAL_DICT_FIELDS = (
     "collectorIntegrity",
     "submissionContext",
 )
-_REQUIRED_V2_DICT_FIELDS = (
+_REQUIRED_DICT_FIELDS = (
     "browserInfo",
     "runtimeIntegrity",
     "fingerprint",
@@ -65,21 +83,27 @@ _REQUIRED_V2_DICT_FIELDS = (
     "sessionBinding",
     "collectorIntegrity",
     "submissionContext",
+    "task",
+    "crossRealm",
+    "errorFingerprint",
+    "stackTraps",
+    "hardware",
+    "capabilities",
 )
 
 
 def validate_shape(data: Any) -> tuple[bool, str | None]:
     """Public Layer 1 shape check. Returns (ok, reason).
 
-    Structural only: confirms the payload is a dict, the legacy raw series are
-    lists, and the advanced-signal fields (browserInfo / pageTimings /
-    eventSequence / targets / trustedEventStats / taskProgress) are correctly
-    typed when present. No behavioral judgement is made here.
+    Structural only: confirms the payload is a schema ``SCHEMA_VERSION`` dict,
+    the raw event series are lists, every required section is an object, and
+    the optional fields are correctly typed when present. No behavioral
+    judgement is made here.
     """
     if not isinstance(data, dict):
         return False, "payload is not an object"
 
-    if str(data.get("schemaVersion")) != "2":
+    if str(data.get("schemaVersion")) != SCHEMA_VERSION:
         return False, "unsupported schemaVersion"
 
     for _field in _REQUIRED_LIST_FIELDS:
@@ -88,9 +112,14 @@ def validate_shape(data: Any) -> tuple[bool, str | None]:
         if not isinstance(data[_field], list):
             return False, f"field is not a list: {_field}"
 
-    for _field in _REQUIRED_V2_DICT_FIELDS:
+    for _field in _REQUIRED_DICT_FIELDS:
         if not isinstance(data.get(_field), dict):
             return False, f"field is not an object: {_field}"
+
+    if "steps" in data["task"] and not isinstance(data["task"]["steps"], list):
+        return False, "field is not a list: task.steps"
+    if "hits" in data["stackTraps"] and not isinstance(data["stackTraps"]["hits"], list):
+        return False, "field is not a list: stackTraps.hits"
 
     for _field in _OPTIONAL_LIST_FIELDS:
         if _field in data and not isinstance(data[_field], list):
@@ -100,12 +129,6 @@ def validate_shape(data: Any) -> tuple[bool, str | None]:
         if _field in data and not isinstance(data[_field], dict):
             return False, f"field is not an object: {_field}"
 
-    # browserInfo is an object when present, but may legitimately be null when the
-    # environment snapshot was unavailable in the browser.
-    if "browserInfo" in data and data["browserInfo"] is not None:
-        if not isinstance(data["browserInfo"], dict):
-            return False, "field is not an object: browserInfo"
-
     return True, None
 
 
@@ -113,48 +136,42 @@ def score_with_metrics_processor(
     data: dict,
     metrics_processor: Callable[[dict], dict] | None = None,
     error_score: float = METRICS_PROCESSOR_ERROR_SCORE,
-) -> float:
-    """Run the detector on a decrypted payload and return a clamped 0..1 score."""
-    score, _ = score_with_metrics_processor_details(
-        data=data,
-        metrics_processor=metrics_processor,
-        error_score=error_score,
-    )
-    return score
+) -> ScoreResult:
+    """Run the detector; return score, category scores and the hard-fail flag.
 
-
-def score_with_metrics_processor_details(
-    data: dict,
-    metrics_processor: Callable[[dict], dict] | None = None,
-    error_score: float = METRICS_PROCESSOR_ERROR_SCORE,
-) -> tuple[float, dict[str, float]]:
-    """Run the detector and return the score plus public category scores."""
+    A scorer that does not report ``hard_fail`` (older wheel) is not a hard fail.
+    """
     processor = metrics_processor or _default_metrics_processor
     if processor is None:
         logger.error("No MetricsProcessor available; returning error score.")
-        return error_score, {}
+        return ScoreResult(error_score, {})
 
     try:
         result = processor(data)
     except Exception as err:
         logger.exception("MetricsProcessor failed: %s", err)
-        return error_score, {}
+        return ScoreResult(error_score, {})
 
     if not isinstance(result, dict):
         logger.warning("MetricsProcessor returned non-dict result: %r", result)
-        return error_score, {}
+        return ScoreResult(error_score, {})
 
     score = _coerce_score(result.get("score"))
     if score is None:
         logger.warning("MetricsProcessor returned invalid score: %r", result.get("score"))
-        return error_score, {}
+        return ScoreResult(error_score, {})
 
     score_message = result.get("score_message")
     category_scores = _parse_score_message(score_message)
     if score_message:
         logger.info("MetricsProcessor score_message: %s", score_message)
 
-    return min(max(score, 0.0), 1.0), category_scores
+    if result.get("hard_fail") is True:
+        reason = result.get("hard_fail_reason")
+        reason = reason if isinstance(reason, str) and reason in HARD_FAIL_REASONS else None
+        return ScoreResult(0.0, category_scores, True, reason)
+
+    return ScoreResult(min(max(score, 0.0), 1.0), category_scores)
 
 
 def _parse_score_message(score_message: Any) -> dict[str, float]:
@@ -188,4 +205,10 @@ def _coerce_score(value: Any) -> float | None:
     return score
 
 
-__all__ = ["validate_shape", "score_with_metrics_processor"]
+__all__ = [
+    "SCHEMA_VERSION",
+    "HARD_FAIL_REASONS",
+    "ScoreResult",
+    "validate_shape",
+    "score_with_metrics_processor",
+]
