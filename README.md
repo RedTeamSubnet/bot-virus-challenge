@@ -74,8 +74,10 @@ For host-local development, use `http://localhost:10001` where a runner process 
 
 1. A miner retrieves the task from `GET /task`.
 2. The miner produces the required output and sends it to `POST /score` together with the corresponding task input and an API key.
-3. The challenge API asks the Container Runner to build the supplied bot/Dockerfile, then run the configured challenge-web sessions.
-4. The miner or operator reads the latest feedback from `GET /result`.
+3. The challenge API asks the Container Runner to build the supplied bot/Dockerfile, then runs one smoke session first.
+4. The bot must complete the page task: scroll the card list to find the code, type it into `#bv-code-input`, set `#bv-slider` to the "Set to N" value, then click `#verify-button`. The page submits an encrypted payload and sets `window.BV_SUBMITTED`.
+5. If the smoke session fails (wrong task answer or a scorer hard fail), the run stops with score `0.0`. Otherwise the remaining sessions run and the score is the average over all sessions.
+6. The miner or operator reads the latest feedback from `GET /result`. It includes `gate_passed` (`null` until known) and a coarse `gate_reason` when the smoke session failed.
 
 Use Swagger for exact request and response schemas; they are versioned with the running API. Basic discovery calls:
 
