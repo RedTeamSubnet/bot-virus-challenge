@@ -61,25 +61,21 @@ def _set_latest_result(
         )
 
 
+FEEDBACK_OK_MIN = 0.85
+
+
 def _feedback_band(score: float) -> str:
-    if score < 0.40:
-        return "weak"
-    if score < 0.65:
-        return "needs_attention"
-    if score < 0.85:
-        return "good"
-    return "strong"
+    # Two levels only: finer bands give miners a tuning signal.
+    return "ok" if score >= FEEDBACK_OK_MIN else "needs_work"
 
 
 def _miner_feedback(category_scores: CategoryScores) -> FeedbackCategories:
-    feedback = {
+    # Caps (`limit`) are deliberately not reported; they stay in the logs.
+    return {
         category: _feedback_band(score)
         for category, score in category_scores.items()
         if category in {"session", "client", "activity"}
     }
-    if "limit" in category_scores:
-        feedback["limit"] = "applied"
-    return feedback
 
 
 def get_result() -> Dict[str, LatestResultValue]:
@@ -163,7 +159,10 @@ def score(miner_output: MinerOutput) -> float:
             timeout_score=config.challenge.session_timeout_score
         )
         category_scores = payload_manager.finalize_category_scores()
-        logger.info(f"[run {payload_manager.run_id}] Final score: {final_score}")
+        logger.info(
+            f"[run {payload_manager.run_id}] Final score: {final_score}; "
+            f"categories: {category_scores}"
+        )
         _set_latest_result(
             score=float(final_score),
             feedback=(
