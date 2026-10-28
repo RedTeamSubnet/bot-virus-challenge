@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import math
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -28,14 +30,81 @@ _BINDING_VERDICT_KEYS = {
 }
 
 
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+_ARRAY_INDEX = re.compile("0|[1-9][0-9]*")
+
+
+def _js_key_order(key: str) -> tuple:
+    """Sort key matching JS own-property order of a key-sorted object.
+
+    Array-index keys ("0".."4294967294") come first in numeric order; the rest
+    keep the ``Array#sort`` order (UTF-16 code units).
+    """
+    if _ARRAY_INDEX.fullmatch(key) and int(key) < 2**32 - 1:
+        return (0, int(key), b"")
+    return (1, 0, key.encode("utf-16-be", "surrogatepass"))
+
+
+def _js_number(value: float) -> str:
+    """Format a float exactly like JavaScript ``Number#toString`` in JSON."""
+    if math.isnan(value) or math.isinf(value):
+        return "null"
+    if value == 0:
+        return "0"
+    # repr() gives the same shortest round-trip digits as JS; only the
+    # placement of the decimal point / exponent differs.
+    mantissa, _, exp = repr(abs(value)).partition("e")
+    int_part, _, frac_part = mantissa.partition(".")
+    all_digits = int_part + frac_part
+    stripped = all_digits.lstrip("0")
+    n = len(int_part) + int(exp or 0) - (len(all_digits) - len(stripped))
+    digits = stripped.rstrip("0")
+    k = len(digits)
+    if k <= n <= 21:
+        text = digits + "0" * (n - k)
+    elif 0 < n <= 21:
+        text = digits[:n] + "." + digits[n:]
+    elif -6 < n <= 0:
+        text = "0." + "0" * -n + digits
+    else:
+        e = n - 1
+        text = (digits[0] + ("." + digits[1:] if k > 1 else "")
+                + "e" + ("+" if e >= 0 else "-") + str(abs(e)))
+    return "-" + text if value < 0 else text
+
+
+def _canonical_json(value: Any) -> str:
+    """Serialize like the browser SDK: sorted keys + ``JSON.stringify``.
+
+    The client hashes ``JSON.stringify(canonicalize(payload))`` as UTF-8, so
+    non-ASCII stays raw, lone surrogates are ``\\uXXXX`` escaped, numbers use
+    JS formatting and keys follow JS property order (see ``_js_key_order``).
+    """
+    if isinstance(value, dict):
+        keys = sorted(value, key=lambda k: _js_key_order(str(k)))
+        return "{" + ",".join(
+            _canonical_json(str(k)) + ":" + _canonical_json(value[k]) for k in keys
+        ) + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(_canonical_json(v) for v in value) + "]"
+    if isinstance(value, str):
+        return _LONE_SURROGATE.sub(
+            lambda m: "\\u%04x" % ord(m.group()), json.dumps(value, ensure_ascii=False)
+        )
+    if isinstance(value, float):
+        return _js_number(value)
+    return json.dumps(value)  # bool, int, None
+
+
 def _payload_hash(data: dict) -> str:
-    clone = json.loads(json.dumps(data, sort_keys=True, separators=(",", ":")))
+    clone = dict(data)
     binding = clone.get("sessionBinding")
     if isinstance(binding, dict):
-        binding.pop("payloadHash", None)
-        for key in _BINDING_VERDICT_KEYS:
-            binding.pop(key, None)
-    raw = json.dumps(clone, sort_keys=True, separators=(",", ":")).encode()
+        excluded = _BINDING_VERDICT_KEYS | {"payloadHash"}
+        clone["sessionBinding"] = {
+            k: v for k, v in binding.items() if k not in excluded
+        }
+    raw = _canonical_json(clone).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -71,6 +140,8 @@ class SessionRecord:
     timed_out: bool = False
     hard_fail: bool = False
     hard_fail_reason: Optional[str] = None
+    score_source: Optional[str] = None
+    scorer_error_type: Optional[str] = None
 
 
 @dataclass
@@ -81,6 +152,8 @@ class EvalOutcome:
     category_scores: Dict[str, float] = field(default_factory=dict)
     hard_fail: bool = False
     hard_fail_reason: Optional[str] = None
+    score_source: Optional[str] = None
+    scorer_error_type: Optional[str] = None
 
 
 class PayloadManager:
@@ -172,6 +245,14 @@ class PayloadManager:
     def completed_count(self) -> int:
         return sum(record.completed for record in self.sessions.values())
 
+    def fallback_count(self) -> int:
+        """Completed sessions whose score is the scorer-error fallback."""
+        with self.claim_lock:
+            return sum(
+                record.completed and record.score_source == "fallback"
+                for record in self.sessions.values()
+            )
+
     def process_eval(
         self,
         data: str,
@@ -215,7 +296,8 @@ class PayloadManager:
                     result = score_fn(payload)
                 else:
                     result = ScoreResult(
-                        config.challenge.gate_fail_score, {}, True, TASK_FAIL_REASON
+                        config.challenge.gate_fail_score, {}, True, TASK_FAIL_REASON,
+                        score_source="gate",
                     )
                 record.score = result.score
                 record.category_scores = result.category_scores
@@ -223,6 +305,8 @@ class PayloadManager:
                 record.hard_fail_reason = (
                     result.hard_fail_reason if record.hard_fail else None
                 )
+                record.score_source = result.score_source
+                record.scorer_error_type = result.scorer_error_type
                 record.completed = True
                 return EvalOutcome(
                     status="recorded",
@@ -231,6 +315,8 @@ class PayloadManager:
                     category_scores=result.category_scores,
                     hard_fail=record.hard_fail,
                     hard_fail_reason=record.hard_fail_reason,
+                    score_source=record.score_source,
+                    scorer_error_type=record.scorer_error_type,
                 )
 
         return EvalOutcome(status="unattributable")
