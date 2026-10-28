@@ -42,6 +42,9 @@ class _FakePayloadManager:
     def completed_count(self) -> int:
         return self.completed
 
+    def fallback_count(self) -> int:
+        return 0
+
     def finalize(self, timeout_score: float) -> float:
         return 0.8
 

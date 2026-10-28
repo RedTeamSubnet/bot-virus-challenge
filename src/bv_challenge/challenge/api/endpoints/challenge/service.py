@@ -155,12 +155,29 @@ def score(miner_output: MinerOutput) -> float:
                     score_job_id=score_job_id,
                     target_completed=expected_sessions,
                 )
+        if smoke_runner_failed:
+            # Infrastructure failure before the gate decision. The score below
+            # is still the plain average (policy unchanged pending owner
+            # decision on runner_fail_score); flag it so it is not mistaken
+            # for a completed evaluation.
+            evaluation_status = "smoke_runner_failed"
+            logger.warning(
+                f"[run {payload_manager.run_id}] Runner failed during the smoke "
+                "session; gate not evaluated, remaining sessions not run"
+            )
+        elif runner_failed:
+            evaluation_status = "batch_runner_failed"
+        else:
+            evaluation_status = "completed"
         final_score = payload_manager.finalize(
             timeout_score=config.challenge.session_timeout_score
         )
         category_scores = payload_manager.finalize_category_scores()
         logger.info(
             f"[run {payload_manager.run_id}] Final score: {final_score}; "
+            f"status={evaluation_status}; "
+            f"completed={payload_manager.completed_count()}/{expected_sessions}; "
+            f"scorer_fallbacks={payload_manager.fallback_count()}; "
             f"categories: {category_scores}"
         )
         _set_latest_result(
@@ -242,7 +259,8 @@ def _score_payload(plain_data: dict) -> scoring.ScoreResult:
         if not shape_ok:
             logger.info(f"Layer 1 shape check rejected session: {shape_reason}")
             return scoring.ScoreResult(
-                config.challenge.gate_fail_score, {}, True, "payload"
+                config.challenge.gate_fail_score, {}, True, "payload",
+                score_source="gate",
             )
         return scoring.score_with_metrics_processor(
             data=plain_data,
@@ -250,7 +268,17 @@ def _score_payload(plain_data: dict) -> scoring.ScoreResult:
         )
     except Exception as err:
         logger.error(f"Unexpected scoring error; recording error score: {err}")
-        return scoring.ScoreResult(config.challenge.metrics_processor_error_score, {})
+        return scoring.ScoreResult(
+            config.challenge.metrics_processor_error_score, {},
+            score_source="fallback", scorer_error_type="unexpected",
+        )
+    except BaseException as err:
+        # A Rust panic surfaces as pyo3 PanicException (a BaseException), which
+        # the handlers above do not catch. Behaviour is unchanged (re-raised,
+        # session left unrecorded); this only makes the cause visible.
+        if type(err).__name__ == "PanicException":
+            logger.error(f"Scorer panic (scorer_error_type=panic): {err}")
+        raise
 
 
 @validate_call
@@ -264,6 +292,8 @@ def eval_bot(data: str, trusted_request: dict | None = None) -> None:
     if outcome.status == "recorded":
         logger.info(
             f"Recorded session {outcome.session_id} score: {outcome.score}"
+            f" source={outcome.score_source}"
+            + (f" scorer_error={outcome.scorer_error_type}" if outcome.scorer_error_type else "")
             + (f" (hard fail: {outcome.hard_fail_reason})" if outcome.hard_fail else "")
         )
     elif outcome.status == "duplicate":

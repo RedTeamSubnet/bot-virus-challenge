@@ -35,6 +35,17 @@ class ScoreResult(NamedTuple):
     category_scores: dict[str, float]
     hard_fail: bool = False
     hard_fail_reason: str | None = None
+    # Operator diagnostics only; never returned to miners (see service.get_result).
+    score_source: str = "scorer"  # "scorer" | "fallback" | "gate"
+    scorer_error_type: str | None = None
+
+    @property
+    def fallback_used(self) -> bool:
+        return self.score_source == "fallback"
+
+
+def _fallback(error_score: float, error_type: str) -> ScoreResult:
+    return ScoreResult(error_score, {}, score_source="fallback", scorer_error_type=error_type)
 
 try:
     from rt_bv_score import MetricsProcessor as _default_metrics_processor
@@ -144,22 +155,22 @@ def score_with_metrics_processor(
     processor = metrics_processor or _default_metrics_processor
     if processor is None:
         logger.error("No MetricsProcessor available; returning error score.")
-        return ScoreResult(error_score, {})
+        return _fallback(error_score, "unavailable")
 
     try:
         result = processor(data)
     except Exception as err:
         logger.exception("MetricsProcessor failed: %s", err)
-        return ScoreResult(error_score, {})
+        return _fallback(error_score, "exception")
 
     if not isinstance(result, dict):
         logger.warning("MetricsProcessor returned non-dict result: %r", result)
-        return ScoreResult(error_score, {})
+        return _fallback(error_score, "invalid_result")
 
     score = _coerce_score(result.get("score"))
     if score is None:
         logger.warning("MetricsProcessor returned invalid score: %r", result.get("score"))
-        return ScoreResult(error_score, {})
+        return _fallback(error_score, "invalid_score")
 
     score_message = result.get("score_message")
     category_scores = _parse_score_message(score_message)
