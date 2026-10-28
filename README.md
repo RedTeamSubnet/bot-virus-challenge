@@ -73,7 +73,7 @@ For host-local development, use `http://localhost:10001` where a runner process 
 ## Miner evaluation workflow
 
 1. A miner retrieves the task from `GET /task`.
-2. The miner produces the required output and sends it to `POST /score` together with the corresponding task input and an API key.
+2. The miner produces the required output and sends it to `POST /score` with an API key.
 3. The challenge API asks the Container Runner to build the supplied bot/Dockerfile, then runs one smoke session first.
 4. The bot must complete the page task: scroll the card list to find the code, type it into `#bv-code-input`, set `#bv-slider` to the "Set to N" value, then click `#verify-button`. The page submits an encrypted payload and sets `window.BV_SUBMITTED`.
 5. If the smoke session fails (wrong task answer or a scorer hard fail), the run stops with score `0.0`. Otherwise the remaining sessions run and the score is the average over all sessions.
@@ -86,7 +86,7 @@ curl -s http://localhost:10001/task | jq
 curl -s http://localhost:10001/result | jq
 ```
 
-`POST /score` requires the `miner_input` and `miner_output` models returned/defined by the API. Do not hand-copy stale payload shapes: use `/docs` or `/openapi.json` from the deployed version.
+`POST /score` takes the `MinerOutput` model as the whole request body: `{"commit_files": [{"file_name": "bot.py", "content": "..."}, {"file_name": "Dockerfile", "content": "..."}]}`. Do not hand-copy stale payload shapes: use `/docs` or `/openapi.json` from the deployed version.
 
 ### Score API authentication
 

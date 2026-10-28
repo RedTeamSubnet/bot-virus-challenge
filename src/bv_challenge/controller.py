@@ -84,5 +84,5 @@ class BVController(Controller):
 
 
 __all__ = [
-    "MyController",
+    "BVController",
 ]

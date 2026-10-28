@@ -21,6 +21,7 @@ def request_json(
     *,
     headers: dict[str, str] | None = None,
     body: object | None = None,
+    timeout: float = 30,
 ) -> tuple[int, object]:
     data = None if body is None else json.dumps(body).encode("utf-8")
     request = Request(
@@ -30,7 +31,7 @@ def request_json(
         method="POST" if data else "GET",
     )
     try:
-        with urlopen(request, timeout=30) as response:
+        with urlopen(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
             return response.status, json.loads(raw)
     except HTTPError as error:
@@ -54,6 +55,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_SUBMISSION_DIR,
         help="Directory containing bot.py and Dockerfile.",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=1200,
+        help="Seconds to wait for /score (build + all sessions); default 1200.",
     )
     parser.add_argument(
         "--verbose",
@@ -84,25 +91,15 @@ def main() -> int:
     base_url = args.base_url.rstrip("/")
     try:
         commit_files = read_submission(args.submission_dir)
-        if args.verbose:
-            print(f"GET {base_url}/task", file=sys.stderr)
-        task_status, miner_input = request_json(f"{base_url}/task")
-        if task_status != 200 or not isinstance(miner_input, dict):
-            print(
-                json.dumps({"status": task_status, "response": miner_input}, indent=2),
-                file=sys.stderr,
-            )
-            return 1
-        payload = {
-            "miner_input": miner_input,
-            "miner_output": {"commit_files": commit_files},
-        }
+        # POST /score takes MinerOutput as the whole body (see /openapi.json).
+        payload = {"commit_files": commit_files}
         if args.verbose:
             print(f"POST {base_url}/score", file=sys.stderr)
         score_status, score_response = request_json(
             f"{base_url}/score",
             headers={"Content-Type": "application/json", "X-API-Key": args.api_key},
             body=payload,
+            timeout=args.timeout,
         )
     except (OSError, URLError, ValueError) as error:
         print(f"Submission failed: {error}", file=sys.stderr)

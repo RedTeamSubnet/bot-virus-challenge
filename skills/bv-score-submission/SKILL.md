@@ -5,7 +5,7 @@ description: Submit the local Bot Virus Challenge miner submission to a running 
 
 # Submit Bot Virus Score
 
-Run `skills/bv-score-submission/scripts/submit_score.py` from the Bot Virus Challenge repository. It obtains a fresh task, reads `bot.py` and `Dockerfile` from the submission directory, and submits both as the `miner_output` payload.
+Run `skills/bv-score-submission/scripts/submit_score.py` from the Bot Virus Challenge repository. It reads `bot.py` and `Dockerfile` from the submission directory and submits them as the `MinerOutput` body (`{"commit_files": [...]}`). Use `--timeout` (default 1200 s) for long runs.
 
 ## Workflow
 

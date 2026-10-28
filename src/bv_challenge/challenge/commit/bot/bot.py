@@ -26,39 +26,37 @@ SLIDER_PATTERN = re.compile(r"Set to\s+(\d+)", re.IGNORECASE)
 SCROLL_STEP = 300
 MAX_SCROLL_STEPS = 80
 
-# Look for a 6-character code ([A-Z2-9]) in the raw text of elements that are
-# currently inside the viewport. textContent keeps the original case, so
-# upper-cased labels (CSS text-transform) are not mistaken for the code.
-FIND_CODE_JS = """
-const pattern = /\\b[A-Z2-9]{6}\\b/;
-for (const el of document.body.querySelectorAll('*')) {
-  if (['SCRIPT', 'STYLE', 'BUTTON', 'INPUT', 'LABEL'].includes(el.tagName)) continue;
-  if (el.children.length) continue;
-  const match = pattern.exec(el.textContent || '');
-  if (!match) continue;
-  const rect = el.getBoundingClientRect();
-  if (rect.bottom > 0 && rect.top < window.innerHeight) return match[0];
-}
-return null;
+# The scroll step only counts once the code card is fully visible above the
+# verification panel (same rule as the page: top >= 0, bottom <= panel top).
+# textContent keeps the original case, so upper-cased labels (CSS
+# text-transform) are not mistaken for the code.
+CODE_CARD_JS = """
+const card = document.getElementById('bv-code-card');
+if (!card) return null;
+const rect = card.getBoundingClientRect();
+const panel = document.getElementById('bv-panel');
+const limit = panel ? panel.getBoundingClientRect().top : window.innerHeight;
+const match = /\\b[A-Z2-9]{6}\\b/.exec(card.textContent || '');
+return {top: rect.top, bottom: rect.bottom, limit: limit,
+        code: match ? match[0] : null};
 """
 
 
-def find_code(driver) -> str | None:
-    """Return the code if its card is currently visible, else None."""
-    return driver.execute_script(FIND_CODE_JS)
-
-
 def scroll_until_code(driver) -> str:
-    """Scroll with the mouse wheel until the code card shows up."""
-    origin = ScrollOrigin.from_viewport(640, 400)
+    """Wheel-scroll until the code card sits fully above the panel."""
+    origin = ScrollOrigin.from_viewport(640, 200)
     for _ in range(MAX_SCROLL_STEPS):
-        code = find_code(driver)
-        if code:
-            return code
-        ActionChains(driver).scroll_from_origin(origin, 0, SCROLL_STEP).pause(
-            0.15
-        ).perform()
-    raise RuntimeError("code card not found")
+        card = driver.execute_script(CODE_CARD_JS)
+        if card is None:
+            raise RuntimeError("code card not found")
+        if card["top"] >= 0 and card["bottom"] <= card["limit"] and card["code"]:
+            return card["code"]
+        if card["top"] < 0:
+            delta = int(card["top"]) - 20  # overshot: scroll back up
+        else:
+            delta = min(SCROLL_STEP, int(card["bottom"] - card["limit"]) + 20)
+        ActionChains(driver).scroll_from_origin(origin, 0, delta).pause(0.15).perform()
+    raise RuntimeError("code card never fully visible")
 
 
 def read_slider_target(driver) -> int:
