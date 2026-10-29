@@ -2,9 +2,12 @@
 
 The page asks for four steps, in order:
   1. scroll the card list until the card showing a 6-character code appears,
-  2. type that code into #bv-code-input,
-  3. set the slider #bv-slider to the value in its "Set to N" label,
-  4. click #verify-button.
+  2. type that code into the code input,
+  3. set the slider to the value in its "Set to N" label,
+  4. click the verify button.
+
+The element ids may be random per session; the page publishes the ones in use
+as ``window.BV_TASK.ids`` (canonical name -> DOM id), so look them up there.
 
 This is a plain Selenium bot, not a stealth bot. It reads everything from the
 page DOM.
@@ -30,16 +33,27 @@ MAX_SCROLL_STEPS = 80
 # verification panel (same rule as the page: top >= 0, bottom <= panel top).
 # textContent keeps the original case, so upper-cased labels (CSS
 # text-transform) are not mistaken for the code.
+ELEMENT_ID_JS = """
+const ids = (window.BV_TASK && window.BV_TASK.ids) || {};
+return ids[arguments[0]] || arguments[0];
+"""
+
 CODE_CARD_JS = """
-const card = document.getElementById('bv-code-card');
+const ids = (window.BV_TASK && window.BV_TASK.ids) || {};
+const card = document.getElementById(ids['bv-code-card'] || 'bv-code-card');
 if (!card) return null;
 const rect = card.getBoundingClientRect();
-const panel = document.getElementById('bv-panel');
+const panel = document.getElementById(ids['bv-panel'] || 'bv-panel');
 const limit = panel ? panel.getBoundingClientRect().top : window.innerHeight;
 const match = /\\b[A-Z2-9]{6}\\b/.exec(card.textContent || '');
 return {top: rect.top, bottom: rect.bottom, limit: limit,
         code: match ? match[0] : null};
 """
+
+
+def element(driver, name: str):
+    """The task element with canonical id ``name`` (ids may rotate per session)."""
+    return driver.find_element(By.ID, driver.execute_script(ELEMENT_ID_JS, name))
 
 
 def scroll_until_code(driver) -> str:
@@ -93,7 +107,7 @@ def run_bot(url: str) -> bool:
         )
         driver.get(url)
         code_input = WebDriverWait(driver, 10).until(
-            lambda browser: browser.find_element(By.ID, "bv-code-input")
+            lambda browser: element(browser, "bv-code-input")
         )
 
         code = scroll_until_code(driver)
@@ -101,10 +115,10 @@ def run_bot(url: str) -> bool:
         ActionChains(driver).move_to_element(code_input).pause(0.1).click().perform()
         code_input.send_keys(code)
 
-        slider = driver.find_element(By.ID, "bv-slider")
+        slider = element(driver, "bv-slider")
         set_slider(driver, slider, read_slider_target(driver))
 
-        button = driver.find_element(By.ID, "verify-button")
+        button = element(driver, "verify-button")
         ActionChains(driver).move_to_element(button).pause(0.1).click().perform()
         WebDriverWait(driver, 10).until(
             lambda browser: browser.execute_script(
