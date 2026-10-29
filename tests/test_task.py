@@ -38,6 +38,7 @@ def test_generate_task_shape_and_ranges() -> None:
             "codeCardIndex",
             "sliderTarget",
             "sliderTolerance",
+            "ids",
         }
         assert re.fullmatch(r"[0-9a-f]{16}", task["seed"])
         assert re.fullmatch(r"[A-Z2-9]{6}", task["code"])
@@ -98,3 +99,20 @@ def test_config_rejects_inverted_card_range() -> None:
     ChallengeConfig(**base, task_card_count_min=10, task_card_count_max=10)
     with pytest.raises(ValidationError):
         ChallengeConfig(**base, task_card_count_min=20, task_card_count_max=10)
+
+
+def test_element_ids_rotate_per_session_and_map_back() -> None:
+    plain = task_mod.generate_element_ids(False)
+    assert plain == {name: name for name in task_mod.ELEMENT_IDS}
+    a, b = task_mod.generate_element_ids(True), task_mod.generate_element_ids(True)
+    assert set(a) == set(task_mod.ELEMENT_IDS) and a != b
+    assert len(set(a.values())) == len(a)
+    assert all(v.startswith("e") and len(v) == 11 and v not in task_mod.ELEMENT_IDS for v in a.values())
+
+    payload = {"eventSequence": [{"target": a["bv-slider"]}, {"target": "other"}], "n": 3, "x": [a["verify-button"]]}
+    task_mod.canonicalize_element_ids(payload, a)
+    assert payload == {"eventSequence": [{"target": "bv-slider"}, {"target": "other"}], "n": 3, "x": ["verify-button"]}
+    # No rotation, or no stored ids: untouched.
+    assert task_mod.canonicalize_element_ids({"t": "bv-slider"}, plain) == {"t": "bv-slider"}
+    assert task_mod.canonicalize_element_ids({"t": "abc"}, None) == {"t": "abc"}
+

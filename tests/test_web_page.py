@@ -86,7 +86,7 @@ def test_get_web_passes_task_and_stores_expected_answer(monkeypatch, tmp_path) -
     html = client.get("/_web").text
 
     nonce = re.search(r'window\.N="([^"]+)"', html).group(1)
-    task = json.loads(re.search(r"window\.BV_TASK = (\{.*?\});", html).group(1))
+    task = json.loads(re.search(r"window\.BV_TASK = (\{.*?\});</script>", html).group(1))
     assert set(task) == {
         "seed",
         "code",
@@ -94,6 +94,7 @@ def test_get_web_passes_task_and_stores_expected_answer(monkeypatch, tmp_path) -
         "codeCardIndex",
         "sliderTarget",
         "sliderTolerance",
+        "ids",
     }
     assert manager.tasks[nonce] == task
     assert nonce in manager.sessions

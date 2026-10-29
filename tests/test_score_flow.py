@@ -1,5 +1,7 @@
 import threading
 
+import pytest
+import requests
 from fastapi.testclient import TestClient
 
 from src.bv_challenge.challenge.api.main import app
@@ -22,6 +24,19 @@ class _FakePayloadManager:
         self.completed = completed
         self.resets = 0
         self.pops = 0
+        self.sessions = {}
+        self.aborting = None
+        self.bound = None
+
+    def bind_submission(self, submission_id: str, miner_id: str) -> None:
+        self.bound = (submission_id, miner_id)
+        self.submission_id, self.miner_id = submission_id, miner_id
+
+    def aborting_session(self):
+        return self.aborting
+
+    def provenance_records(self) -> list:
+        return []
 
     def has_remaining_tasks(self) -> bool:
         return True
@@ -138,26 +153,74 @@ def test_smoke_session_that_never_arrives_fails_the_gate(monkeypatch) -> None:
     assert result["gate_reason"] == "timeout"
 
 
-def test_runner_failure_in_smoke_skips_second_batch(monkeypatch) -> None:
+def test_runner_failure_in_smoke_aborts_the_run(monkeypatch) -> None:
+    # DH: a partial run is aborted for a full re-run; it never becomes a score.
     calls = _patch(monkeypatch, _FakePayloadManager(), web_results=(True,))
 
-    service.score(miner_output=_miner_output())
+    with pytest.raises(service.RunAborted) as aborted:
+        service.score(miner_output=_miner_output())
 
-    assert [c[0] for c in calls] == ["build", "web"]
+    assert aborted.value.status_code == 503
+    assert aborted.value.outcome["outcome"] == "infrastructure_error"
+    assert [c[0] for c in calls] == ["build", "web"]  # no second batch
     result = service.get_result()
-    assert result["phase"] == "web"
-    assert result["feedback"] == "failed in web scoring phase"
-    assert result["gate_passed"] is None
+    assert (result["phase"], result["score"]) == ("aborted", None)
 
 
-def test_runner_failure_in_second_batch_keeps_gate_passed(monkeypatch) -> None:
+def test_runner_failure_in_second_batch_aborts_the_run(monkeypatch) -> None:
     _patch(monkeypatch, _FakePayloadManager(), web_results=(False, True))
 
-    service.score(miner_output=_miner_output())
+    with pytest.raises(service.RunAborted) as aborted:
+        service.score(miner_output=_miner_output())
 
-    result = service.get_result()
-    assert result["feedback"] == "failed in web scoring phase"
-    assert result["gate_passed"] is True
+    assert aborted.value.outcome == {
+        "outcome": "infrastructure_error", "reason": "runner_failed:batch", "run_id": "test-run",
+    }
+    assert service.get_result()["score"] is None
+
+
+@pytest.mark.parametrize("outcome, status", [("infrastructure_error", 503), ("security_violation", 500)])
+def test_scorer_failure_in_any_session_aborts_without_a_score(monkeypatch, outcome, status) -> None:
+    manager = _FakePayloadManager()
+    manager.aborting = SessionRecord(
+        session_id="s", completed=True, outcome=outcome, scorer_error_type="timeout"
+    )
+    _patch(monkeypatch, manager)
+
+    with pytest.raises(service.RunAborted) as aborted:
+        service.score(miner_output=_miner_output())
+
+    assert aborted.value.status_code == status
+    assert aborted.value.outcome["outcome"] == outcome
+    assert service.get_result()["score"] is None  # never the 0.5 fallback
+
+
+def test_runner_unreachable_during_build_is_infrastructure_not_zero(monkeypatch) -> None:
+    def _down(*args):
+        raise requests.ConnectionError("runner down")
+
+    monkeypatch.setattr(service, "payload_manager", _FakePayloadManager())
+    monkeypatch.setattr(service.challenge_utils, "send_build_request", _down)
+
+    with pytest.raises(service.RunAborted) as aborted:
+        service.score(miner_output=_miner_output())
+    assert aborted.value.outcome["reason"] == "build_transport:ConnectionError"
+
+
+def test_submission_is_bound_by_content_and_miner_id(monkeypatch) -> None:
+    manager = _FakePayloadManager()
+    _patch(monkeypatch, manager)
+    output = _miner_output()
+    output.miner_id = "5Fminerhotkey"
+
+    service.score(miner_output=output)
+
+    submission_id, miner_id = manager.bound
+    assert miner_id == "5Fminerhotkey"
+    assert submission_id == service.submission_digest(output)
+    changed = _miner_output()
+    changed.commit_files[0].content = "print('other bot')"
+    assert service.submission_digest(changed) != submission_id
 
 
 def test_score_returns_zero_when_build_fails(monkeypatch) -> None:

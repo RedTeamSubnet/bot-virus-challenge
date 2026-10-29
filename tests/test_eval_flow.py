@@ -121,3 +121,33 @@ def test_malformed_v3_payload_is_hard_fail_payload(manager, monkeypatch) -> None
 
     record = manager.sessions["nonce0abcdef"]
     assert (record.hard_fail, record.hard_fail_reason) == (True, "payload")
+
+
+def test_rotated_element_ids_reach_the_scorer_as_canonical_names(manager, monkeypatch) -> None:
+    from api.endpoints.challenge.task import generate_element_ids
+
+    seen = {}
+
+    def _capture(data):
+        seen["payload"] = data
+        return {"score": 0.7, "score_message": "session=0.7"}
+
+    monkeypatch.setattr(scoring, "_default_metrics_processor", _capture)
+    task = manager.issue_task("nonce0abcdef")
+    ids = generate_element_ids(True)
+    manager.tasks["nonce0abcdef"]["ids"] = ids
+    payload = _payload(
+        task,
+        eventSequence=[
+            {"type": "input", "t": 1.0, "trusted": True, "target": ids["bv-code-input"]},
+            {"type": "click", "t": 2.0, "trusted": True, "target": ids["verify-button"]},
+        ],
+        clicks=[{"x": 1, "y": 2, "t": 2.0, "trusted": True, "target": ids["verify-button"]}],
+    )
+    _submit(manager, "nonce0abcdef", payload)
+
+    assert manager.sessions["nonce0abcdef"].score == 0.7
+    sent = json.dumps(seen["payload"])
+    assert all(served not in sent for served in ids.values())
+    assert [e["target"] for e in seen["payload"]["eventSequence"]] == ["bv-code-input", "verify-button"]
+    assert seen["payload"]["clicks"][0]["target"] == "verify-button"
