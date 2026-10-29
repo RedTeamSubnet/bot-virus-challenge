@@ -551,3 +551,7 @@ Cargo.lock
 
 ## Local task notes (not tracked)
 docs/tasks/
+
+# The private detector is scored centrally (scorer_backend: remote); its wheel
+# must never be committed here again.
+src/bv_challenge/challenge/requirements/rt_bv_score-*.whl

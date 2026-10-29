@@ -10,10 +10,17 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from api.core import utils
 from api.config import config
+from api.endpoints.challenge import evidence as evidence_mod
 from api.endpoints.challenge import utils as challenge_utils
-from api.endpoints.challenge.scoring import SCHEMA_VERSION, ScoreResult
+from api.endpoints.challenge.scoring import (
+    OUTCOMES_ABORTING_THE_RUN,
+    SCHEMA_VERSION,
+    ScoreResult,
+)
+from api.endpoints.challenge.versioning import VersionPolicy, claimed_client_versions
 from api.endpoints.challenge.task import (
     TASK_FAIL_REASON,
+    canonicalize_element_ids,
     check_task_answer,
     generate_task,
 )
@@ -131,6 +138,35 @@ def _stamp_binding_verdict(
     )
 
 
+@dataclass(frozen=True)
+class EvidencePolicy:
+    """B6 checks applied before a session can be scored."""
+
+    require_attestation: bool
+    session_ttl_ms: int
+    max_payload_bytes: int
+    version_policy: VersionPolicy
+    timing_tolerance_ms: int = evidence_mod.DEFAULT_TIMING_TOLERANCE_MS
+
+
+@dataclass(frozen=True)
+class SessionContext:
+    """What an authoritative scorer call is bound to."""
+
+    run_id: str
+    session_id: str
+    submission_id: str
+    miner_id: str
+    bundle: Dict[str, Any]
+    versions: Dict[str, str]
+    evidence_status: str
+
+
+# Evidence failures are gate failures with an existing coarse reason code.
+def _evidence_fail_reason(reasons: List[str]) -> str:
+    return "payload" if "payload_too_large" in reasons else "integrity"
+
+
 @dataclass
 class SessionRecord:
     session_id: str
@@ -142,6 +178,10 @@ class SessionRecord:
     hard_fail_reason: Optional[str] = None
     score_source: Optional[str] = None
     scorer_error_type: Optional[str] = None
+    outcome: Optional[str] = None
+    evidence_status: Optional[str] = None
+    evidence_reasons: Tuple[str, ...] = ()
+    provenance: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -154,6 +194,8 @@ class EvalOutcome:
     hard_fail_reason: Optional[str] = None
     score_source: Optional[str] = None
     scorer_error_type: Optional[str] = None
+    outcome: Optional[str] = None
+    evidence_status: Optional[str] = None
 
 
 class PayloadManager:
@@ -162,6 +204,9 @@ class PayloadManager:
     def __init__(self) -> None:
         self.run_lock = threading.Lock()
         self.claim_lock = threading.Lock()
+        # None: legacy path (no server-side evidence checks). Set by the
+        # service from configuration.
+        self.evidence_policy: Optional[EvidencePolicy] = None
         self.reset()
 
     def reset(self) -> None:
@@ -181,8 +226,20 @@ class PayloadManager:
         # Expected task answers by session nonce. Same lifecycle as the key
         # pairs: replaced on reset(), only nonces of this run are accepted.
         self.tasks: Dict[str, Dict[str, Any]] = {}
+        # What this server observed when it served /_web for each session.
+        self.web_observations: Dict[str, evidence_mod.RequestObservation] = {}
+        self.submission_id = "unbound"
+        self.miner_id = "unbound"
 
-    def issue_task(self, nonce: str) -> Dict[str, Any]:
+    def bind_submission(self, submission_id: str, miner_id: str) -> None:
+        self.submission_id = submission_id
+        self.miner_id = miner_id
+
+    def issue_task(
+        self,
+        nonce: str,
+        observation: Optional[evidence_mod.RequestObservation] = None,
+    ) -> Dict[str, Any]:
         """Generate the task for a session and remember its expected answer.
 
         A nonce that does not belong to this run (throwaway page) gets a task
@@ -192,10 +249,13 @@ class PayloadManager:
             card_count_min=config.challenge.task_card_count_min,
             card_count_max=config.challenge.task_card_count_max,
             slider_tolerance=config.challenge.task_slider_tolerance,
+            rotate_element_ids=config.challenge.rotate_element_ids,
         )
         with self.claim_lock:
             if nonce in self.sessions:
                 self.tasks[nonce] = dict(task)
+                if observation is not None:
+                    self.web_observations.setdefault(nonce, observation)
         return task
 
     def first_hard_fail(self) -> Optional[SessionRecord]:
@@ -245,6 +305,30 @@ class PayloadManager:
     def completed_count(self) -> int:
         return sum(record.completed for record in self.sessions.values())
 
+    def aborting_session(self) -> Optional[SessionRecord]:
+        """A completed session whose outcome aborts the whole run, if any."""
+        with self.claim_lock:
+            for record in self.sessions.values():
+                if record.completed and record.outcome in OUTCOMES_ABORTING_THE_RUN:
+                    return record
+        return None
+
+    def evidence_counts(self) -> Dict[str, int]:
+        with self.claim_lock:
+            counts: Dict[str, int] = {}
+            for record in self.sessions.values():
+                if record.completed and record.evidence_status:
+                    counts[record.evidence_status] = counts.get(record.evidence_status, 0) + 1
+            return counts
+
+    def provenance_records(self) -> List[Dict[str, Any]]:
+        with self.claim_lock:
+            return [
+                record.provenance
+                for record in self.sessions.values()
+                if record.completed and record.provenance
+            ]
+
     def fallback_count(self) -> int:
         """Completed sessions whose score is the scorer-error fallback."""
         with self.claim_lock:
@@ -257,14 +341,14 @@ class PayloadManager:
         self,
         data: str,
         decrypt_fn: Callable[..., str],
-        score_fn: Callable[[dict], ScoreResult],
+        score_fn: Callable[..., ScoreResult],
         trusted_context: Optional[Dict[str, Optional[str]]] = None,
+        eval_observation: Optional[evidence_mod.RequestObservation] = None,
     ) -> EvalOutcome:
         for session_id, private_key in list(self.private_keys.items()):
             try:
-                payload = json.loads(
-                    decrypt_fn(ciphertext=data, private_key=private_key)
-                )
+                plaintext = decrypt_fn(ciphertext=data, private_key=private_key)
+                payload = json.loads(plaintext)
             except Exception:
                 continue
 
@@ -281,6 +365,9 @@ class PayloadManager:
                 _stamp_binding_verdict(
                     payload, session_id=session_id, duplicate=False
                 )
+                # After the hash check (the browser hashed the ids it was
+                # served): the scorer only ever sees canonical element ids.
+                canonicalize_element_ids(payload, (self.tasks.get(session_id) or {}).get("ids"))
                 # This field is server-owned. Add it only after validating the
                 # client payload hash, and always replace any client-supplied
                 # value before the private scorer sees the payload.
@@ -290,15 +377,26 @@ class PayloadManager:
                     if key in {"userAgent", "acceptLanguage", "secChUa"}
                     and isinstance(value, str)
                 }
+                result = None
+                context = None
+                if self.evidence_policy is not None:
+                    result, context = self._check_evidence(
+                        session_id, payload, plaintext, eval_observation
+                    )
                 # Every session must carry a correct answer to its own task,
                 # whatever schema it claims; the scorer only runs after that.
-                if check_task_answer(self.tasks.get(session_id), payload):
-                    result = score_fn(payload)
-                else:
+                if result is not None:
+                    pass
+                elif not check_task_answer(self.tasks.get(session_id), payload):
                     result = ScoreResult(
                         config.challenge.gate_fail_score, {}, True, TASK_FAIL_REASON,
-                        score_source="gate",
+                        score_source="gate", outcome="invalid",
+                        evidence_status=context.evidence_status if context else None,
                     )
+                elif context is not None:
+                    result = score_fn(payload, context)
+                else:
+                    result = score_fn(payload)
                 record.score = result.score
                 record.category_scores = result.category_scores
                 record.hard_fail = bool(result.hard_fail)
@@ -307,6 +405,10 @@ class PayloadManager:
                 )
                 record.score_source = result.score_source
                 record.scorer_error_type = result.scorer_error_type
+                record.outcome = result.outcome
+                record.evidence_status = result.evidence_status
+                record.evidence_reasons = tuple(result.evidence_reasons)
+                record.provenance = result.provenance
                 record.completed = True
                 return EvalOutcome(
                     status="recorded",
@@ -317,9 +419,88 @@ class PayloadManager:
                     hard_fail_reason=record.hard_fail_reason,
                     score_source=record.score_source,
                     scorer_error_type=record.scorer_error_type,
+                    outcome=record.outcome,
+                    evidence_status=record.evidence_status,
                 )
 
         return EvalOutcome(status="unattributable")
+
+    def _check_evidence(
+        self,
+        session_id: str,
+        payload: Dict[str, Any],
+        plaintext: str,
+        eval_observation: Optional[evidence_mod.RequestObservation],
+    ) -> Tuple[Optional[ScoreResult], Optional[SessionContext]]:
+        """B6: judge the payload against what the server observed.
+
+        Returns a gate result when the evidence is invalid (never a pass),
+        otherwise the context an authoritative scorer call is bound to.
+        Caller holds ``claim_lock``.
+        """
+        policy = self.evidence_policy
+        assert policy is not None
+        observed = eval_observation or evidence_mod.RequestObservation(
+            at_ms=0, runner_attested=False, source=None, user_agent_digest=None
+        )
+        web = self.web_observations.get(session_id)
+        verdict = evidence_mod.assess(
+            payload,
+            web=web,
+            eval_=observed,
+            payload_bytes=len(plaintext.encode("utf-8", "surrogatepass")),
+            require_attestation=policy.require_attestation,
+            session_ttl_ms=policy.session_ttl_ms,
+            max_payload_bytes=policy.max_payload_bytes,
+            timing_tolerance_ms=policy.timing_tolerance_ms,
+        )
+        client_versions = claimed_client_versions(payload)
+        if any(
+            not policy.version_policy.components[name].accepts(client_versions.get(name))
+            for name in ("collector", "sdk")
+        ):
+            # Client-claimed versions are miner-controlled: a mismatch makes
+            # this session invalid; it must not abort (and re-run) the run.
+            verdict = evidence_mod.EvidenceVerdict(
+                evidence_mod.STATUS_INVALID, verdict.reasons + ["version_mismatch"]
+            )
+        if verdict.status == evidence_mod.STATUS_INVALID:
+            return (
+                ScoreResult(
+                    config.challenge.gate_fail_score, {}, True,
+                    _evidence_fail_reason(verdict.reasons),
+                    score_source="gate", outcome="invalid",
+                    evidence_status=verdict.status,
+                    evidence_reasons=tuple(verdict.reasons),
+                ),
+                None,
+            )
+        bundle = evidence_mod.evidence_bundle(
+            run_id=self.run_id,
+            session_id=session_id,
+            payload=payload,
+            web=web,
+            eval_=observed,
+            verdict=verdict,
+        )
+        current = policy.version_policy.current()
+        versions = {
+            "page": current["page"],
+            "task": current["task"],
+            "evidence_schema": str(payload.get("schemaVersion")),
+            "attestation_format": evidence_mod.ATTESTATION_FORMAT,
+            "collector": str(client_versions.get("collector")),
+            "sdk": str(client_versions.get("sdk")),
+        }
+        return None, SessionContext(
+            run_id=self.run_id,
+            session_id=session_id,
+            submission_id=self.submission_id,
+            miner_id=self.miner_id,
+            bundle=bundle,
+            versions=versions,
+            evidence_status=verdict.status,
+        )
 
     def finalize(self, timeout_score: float) -> float:
         if not self.sessions:
@@ -351,4 +532,4 @@ class PayloadManager:
             }
 
 
-__all__ = ["EvalOutcome", "PayloadManager", "SessionRecord"]
+__all__ = ["EvalOutcome", "EvidencePolicy", "PayloadManager", "SessionContext", "SessionRecord"]

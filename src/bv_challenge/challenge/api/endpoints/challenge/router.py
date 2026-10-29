@@ -94,6 +94,19 @@ def get_result(request: Request):
 
 
 @router.get(
+    "/provenance",
+    summary="Signed provenance of the latest run",
+    description="Run manifest and signed scorer results, for validators.",
+    response_class=JSONResponse,
+    dependencies=[Depends(auth_api_key)],
+)
+def get_provenance(request: Request):
+    _request_id = request.state.request_id
+    logger.info(f"[{_request_id}] - Getting latest run provenance...")
+    return service.get_provenance()
+
+
+@router.get(
     "/_web",
     summary="Serves the webpage",
     description="This endpoint serves the webpage for the challenge.",
@@ -169,6 +182,7 @@ def _post_eval_bot(
                 "acceptLanguage": request.headers.get("accept-language"),
                 "secChUa": request.headers.get("sec-ch-ua"),
             },
+            observation=service.observe(request),
         )
 
         logger.success(f"[{_request_id}] - Successfully evaluated the bot.")

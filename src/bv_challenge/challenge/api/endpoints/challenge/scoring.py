@@ -2,11 +2,13 @@
 
 """Public scoring boundary.
 
-The detection logic itself lives in the compiled, private ``rt_bv_score``
-wheel (shipped as a binary ``.so`` like ``vault_unlock``) so the algorithm is
-not readable in this public repo. This module only provides a safe wrapper:
-it calls the detector, validates its result, and falls back to a neutral score
-on any failure.
+The detection logic is private. In production it runs as a central scorer
+service that this image calls over mTLS with signed requests and results
+(``scorer_client.AuthoritativeScorerClient``), so the detector is never
+shipped in this repo or its image. For development a local ``rt_bv_score``
+wheel, or the public ``lite_scorer``, can stand in; their results are never
+authoritative. A scorer failure is an ``infrastructure_error`` outcome and
+aborts the run (``service.score``); it never becomes a score.
 """
 
 import logging
@@ -38,23 +40,64 @@ class ScoreResult(NamedTuple):
     # Operator diagnostics only; never returned to miners (see service.get_result).
     score_source: str = "scorer"  # "scorer" | "fallback" | "gate"
     scorer_error_type: str | None = None
+    # "scored" | "invalid" | "review" | "infrastructure_error" | "security_violation"
+    outcome: str = "scored"
+    evidence_status: str | None = None
+    evidence_reasons: tuple[str, ...] = ()
+    # Signed scoring-result envelope (authoritative remote scoring only).
+    provenance: dict | None = None
 
     @property
     def fallback_used(self) -> bool:
         return self.score_source == "fallback"
 
 
+OUTCOMES_ABORTING_THE_RUN = frozenset({"infrastructure_error", "security_violation"})
+
+
 def _fallback(error_score: float, error_type: str) -> ScoreResult:
-    return ScoreResult(error_score, {}, score_source="fallback", scorer_error_type=error_type)
+    # The value is never used: the run is aborted (DH: no 0.5 fallback).
+    return ScoreResult(
+        error_score, {}, score_source="fallback", scorer_error_type=error_type,
+        outcome="infrastructure_error",
+    )
 
 try:
     from rt_bv_score import MetricsProcessor as _default_metrics_processor
-except ImportError:  # private detector wheel not installed (local dev / CI)
+except ImportError:  # private detector wheel not installed (central scoring / dev / CI)
     _default_metrics_processor = None
-    logger.warning(
-        "rt_bv_score is not installed; scoring falls back to the error score "
-        "unless a metrics processor is injected."
-    )
+
+
+# --- Scorer backends ----------------------------------------------------------
+# Production scores centrally (see scorer_client); the backends below are the
+# development stand-ins used when no scorer_url is configured.
+
+
+def resolve_metrics_processor(
+    backend: str,
+    url: str | None = None,
+) -> Callable[[dict], dict] | None:
+    """Pick the development scorer for ``backend``.
+
+    Remote (authoritative) scoring does not go through a metrics processor;
+    the service builds ``AuthoritativeScorerClient`` for it. ``None`` means
+    the local ``rt_bv_score`` wheel, looked up at call time by
+    ``score_with_metrics_processor``; without it every session is an
+    infrastructure error and the run aborts.
+    """
+    if backend == "remote" or (backend == "auto" and url):
+        raise ValueError("remote scoring uses scorer_client.AuthoritativeScorerClient")
+    if backend == "lite":
+        from .lite_scorer import metrics_processor as lite
+
+        logger.warning("Scoring with the PUBLIC lite scorer: development only, not the real detector.")
+        return lite
+    if _default_metrics_processor is None:
+        logger.warning(
+            "rt_bv_score is not installed and no scorer_url is set; scoring falls "
+            "back to the error score unless a metrics processor is injected."
+        )
+    return None
 
 
 # --- Public structural shape validation -------------------------------------
@@ -220,6 +263,8 @@ __all__ = [
     "SCHEMA_VERSION",
     "HARD_FAIL_REASONS",
     "ScoreResult",
+    "OUTCOMES_ABORTING_THE_RUN",
+    "resolve_metrics_processor",
     "validate_shape",
     "score_with_metrics_processor",
 ]

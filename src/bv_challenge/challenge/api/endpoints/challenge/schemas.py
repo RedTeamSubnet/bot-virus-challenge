@@ -92,6 +92,11 @@ class MinerOutput(BaseModel):
         title="Commit Files",
         description="Exactly bot.py and Dockerfile.",
     )
+    # Bound into every signed scoring request and result. Optional until the
+    # subnet contract supplies it; without it provenance says "unbound".
+    miner_id: Optional[
+        constr(strip_whitespace=True, min_length=1, max_length=128)  # type: ignore
+    ] = Field(default=None, title="Miner ID", description="Miner hotkey or UID.")
     model_config = {
         "json_schema_extra": {
             "examples": [
