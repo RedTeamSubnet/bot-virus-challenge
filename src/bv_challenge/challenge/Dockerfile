@@ -29,9 +29,7 @@ RUN --mount=type=cache,target=/root/.cache,sharing=locked \
 # COPY ./requirements* ./
 RUN	--mount=type=cache,target=/root/.cache,sharing=locked \
 	--mount=type=bind,source=requirements.txt,target=requirements.txt \
-	--mount=type=bind,source=requirements,target=requirements \
-	python3 -m uv pip install --prefix=/install -r ./requirements.txt && \
-	python3 -m uv pip install --prefix=/install ./requirements/*.whl
+	python3 -m uv pip install --prefix=/install -r ./requirements.txt
 
 
 ## Here is the base image:
