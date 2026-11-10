@@ -2,14 +2,11 @@
 
 import os
 from pathlib import Path
-from typing import Optional, Union
+from typing import Dict, Optional
 
 from pydantic import BaseModel, Field, constr, field_validator
 
-from api.core import utils
-from api.core.constants import ALPHANUM_CUSTOM_REGEX, ALPHANUM_REGEX
-
-MAX_EVAL_PAYLOAD_LENGTH = 128 * 1024
+from api.core.constants import ALPHANUM_REGEX
 
 
 _COMMIT_DIR = Path(
@@ -32,20 +29,6 @@ _BOT_PY_EXAMPLE = _read_example("bot.py")
 _DOCKERFILE_EXAMPLE = _read_example("Dockerfile")
 
 
-class KeyPairPM(BaseModel):
-    private_key: str = Field(..., min_length=32, title="Private Key")
-    public_key: Union[str, None] = Field(default=None, title="Public Key")
-    nonce: Union[
-        constr(  # type: ignore
-            strip_whitespace=True,
-            min_length=4,
-            max_length=64,
-            pattern=ALPHANUM_REGEX,
-        ),
-        None,
-    ] = Field(default=None, title="Nonce")
-
-
 class CommitFilePM(BaseModel):
     file_name: constr(strip_whitespace=True, min_length=4, max_length=64) = Field(  # type: ignore
         ...,
@@ -66,22 +49,6 @@ class CommitFilePM(BaseModel):
         if val not in {"bot.py", "Dockerfile"}:
             raise ValueError("Only bot.py and Dockerfile are allowed")
         return val
-
-
-class MinerInput(BaseModel):
-    random_val: Optional[
-        constr(  # type: ignore
-            strip_whitespace=True,
-            min_length=4,
-            max_length=64,
-            pattern=ALPHANUM_REGEX,
-        )
-    ] = Field(
-        default_factory=utils.gen_random_string,
-        title="Random Value",
-        description="Random value to prevent caching.",
-        examples=["a1b2c3d4e5f6g7h8"],
-    )
 
 
 class MinerOutput(BaseModel):
@@ -123,42 +90,39 @@ class MinerOutput(BaseModel):
         return val
 
     def get_file(self, file_name: str) -> str:
-        return next(item.content for item in self.commit_files if item.file_name == file_name)
+        return next(
+            item.content for item in self.commit_files if item.file_name == file_name
+        )
 
 
-class ErrorData(BaseModel):
-    data: str = Field(
+class PayloadRequest(BaseModel):
+    session_id: constr(strip_whitespace=True, min_length=8, max_length=64, pattern=ALPHANUM_REGEX) = Field(  # type: ignore
         ...,
-        min_length=2,
-        max_length=MAX_EVAL_PAYLOAD_LENGTH,
-        pattern=ALPHANUM_CUSTOM_REGEX,
-        title="Bot Data",
-        description="Bot data to evaluate.",
-        examples=["data"],
+        title="Session ID",
+        description="Session identifier the scorer received for the run.",
+    )
+    score: float = Field(..., ge=0.0, le=1.0, title="Score")
+    category_scores: Dict[str, float] = Field(
+        default_factory=dict,
+        title="Category Scores",
+        description="Per-category breakdown of the score; passed through to /result.",
+    )
+    feedback: Optional[str] = Field(
+        default=None,
+        max_length=512,
+        title="Feedback",
+        description="Optional human-readable feedback from the scorer.",
     )
 
 
-class EvalPayload(BaseModel):
-    error: ErrorData
-
-
-class RandomValRequest(BaseModel):
-    random_val: str = Field(
-        ...,
-        min_length=4,
-        max_length=64,
-        pattern=ALPHANUM_REGEX,
-        title="Random value",
-        description="Random value.",
-        examples=["a1b2c3d4e5f6g7h8"],
-    )
+class ScoreResponse(BaseModel):
+    session_id: str = Field(..., title="Session ID")
+    score: float = Field(..., ge=0.0, le=1.0, title="Score")
 
 
 __all__ = [
-    "KeyPairPM",
     "CommitFilePM",
-    "MinerInput",
     "MinerOutput",
-    "EvalPayload",
-    "RandomValRequest",
+    "PayloadRequest",
+    "ScoreResponse",
 ]

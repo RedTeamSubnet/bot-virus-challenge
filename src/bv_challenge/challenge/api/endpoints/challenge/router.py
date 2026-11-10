@@ -4,69 +4,33 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
 
 from api.core.responses import BaseResponse
-from api.endpoints.challenge.schemas import (
-    MinerInput,
-    MinerOutput,
-    EvalPayload,
-    RandomValRequest,
-)
-from api.endpoints.challenge import service
 from api.core.dependencies.auth import auth_api_key
+from api.endpoints.challenge import service
+from api.endpoints.challenge.schemas import (
+    MinerOutput,
+    PayloadRequest,
+    ScoreResponse,
+)
 from api.logger import logger
 
 router = APIRouter(tags=["Challenge"])
 
 
-@router.get(
-    "/task",
-    summary="Get task",
-    description="This endpoint returns the webpage URL for the challenge.",
-    response_class=JSONResponse,
-    response_model=MinerInput,
-)
-def get_task(request: Request):
-
-    _request_id = request.state.request_id
-    logger.info(f"[{_request_id}] - Getting task...")
-
-    _miner_input: MinerInput
-    try:
-        _miner_input = service.get_task()
-
-        logger.success(f"[{_request_id}] - Successfully got the task.")
-    except Exception as err:
-        if isinstance(err, HTTPException):
-            raise
-
-        logger.error(
-            f"[{_request_id}] - Failed to get task!",
-        )
-        raise
-
-    return _miner_input
-
-
 @router.post(
     "/score",
     summary="Score",
-    description="This endpoint score miner output.",
+    description="Build + run the miner bot inside DinD against the web page; wait for scorer callback; return final score.",
     response_class=JSONResponse,
+    response_model=ScoreResponse,
     responses={400: {}, 422: {}},
     dependencies=[Depends(auth_api_key)],
 )
-def post_score(
-    request: Request,
-    miner_output: MinerOutput,
-):
-
+def post_score(request: Request, miner_output: MinerOutput) -> ScoreResponse:
     _request_id = request.state.request_id
     logger.info(f"[{_request_id}] - Evaluating the miner output...")
-
     try:
-        _score = service.score(miner_output=miner_output)
+        _response = service.score(miner_output=miner_output)
     except HTTPException:
-        # Already a well-formed HTTP error (e.g. TOO_MANY_REQUESTS) -- let it
-        # propagate so the client gets the real status, never a 200/null.
         logger.error(f"[{_request_id}] - Failed to evaluate the miner output!")
         raise
     except Exception as err:
@@ -77,8 +41,10 @@ def post_score(
             status_code=500, detail="Failed to evaluate the miner output."
         )
 
-    logger.success(f"[{_request_id}] - Successfully scored the miner output: {_score}")
-    return _score
+    logger.success(
+        f"[{_request_id}] - Scored session {_response.session_id}: {_response.score}"
+    )
+    return _response
 
 
 @router.get(
@@ -94,66 +60,27 @@ def get_result(request: Request):
 
 
 @router.post(
-    "/_random_val",
-    summary="Random value",
-    responses={401: {}, 422: {}, 429: {}},
+    "/payload",
+    summary="Scorer callback",
+    description="Scorer posts the computed score keyed by session_id; unblocks the matching /score call.",
+    response_class=JSONResponse,
+    responses={401: {}, 404: {}, 422: {}},
+    dependencies=[Depends(auth_api_key)],
 )
-def post_random_val(request: Request, payload: RandomValRequest):
+def post_payload(request: Request, payload: PayloadRequest):
     _request_id = request.state.request_id
-    logger.info(f"[{_request_id}] - Checking random val...")
-
-    random_val = payload.random_val.strip()
-    nonce_val: str
+    logger.info(
+        f"[{_request_id}] - Recording payload for session {payload.session_id}..."
+    )
     try:
-        nonce_val = service.get_random_val(nonce=random_val)
-        logger.success(f"[{_request_id}] - Successfully checked the random val.")
-    except Exception as err:
-        if isinstance(err, HTTPException):
-            raise
-        logger.error(f"[{_request_id}] - Failed to check the random val!")
+        service.record_payload(payload=payload)
+    except HTTPException:
         raise
-
-    _response = {"nonce_val": nonce_val}
-    return _response
-
-
-@router.post(
-    "/_eval",
-    summary="Evaluate",
-    description="This endpoint evaluate.",
-    responses={422: {}, 429: {}},
-)
-def _post_eval_bot(
-    request: Request,
-    payload: EvalPayload,
-):
-    _request_id = request.state.request_id
-    logger.info(f"[{_request_id}] - Evaluating the bot...")
-
-    try:
-        # Extract the data from the nested structure
-        data = payload.error.data
-        service.eval_bot(
-            data=data,
-            trusted_request={
-                "userAgent": request.headers.get("user-agent"),
-                "acceptLanguage": request.headers.get("accept-language"),
-                "secChUa": request.headers.get("sec-ch-ua"),
-            },
-        )
-
-        logger.success(f"[{_request_id}] - Successfully evaluated the bot.")
     except Exception as err:
-        if isinstance(err, HTTPException):
-            raise
+        logger.error(f"[{_request_id}] - Failed to record payload: {err}")
+        raise HTTPException(status_code=500, detail="Failed to record payload.")
 
-        logger.error(
-            f"[{_request_id}] - Failed to evaluate the bot!",
-        )
-        raise
-
-    _response = BaseResponse(request=request, message="Successfully evaluated the bot.")
-    return _response
+    return BaseResponse(request=request, message="Payload recorded.")
 
 
 __all__ = ["router"]

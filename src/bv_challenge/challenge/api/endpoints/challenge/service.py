@@ -2,6 +2,7 @@
 
 import threading
 import uuid
+from dataclasses import dataclass, field
 from typing import Dict, Union
 
 from pydantic import validate_call
@@ -9,64 +10,55 @@ from pydantic import validate_call
 from api.config import config
 from api.core.constants import ErrorCodeEnum
 from api.core.exceptions import BaseHTTPException
-from api.endpoints.challenge import scoring
 from api.endpoints.challenge import utils as challenge_utils
-from api.endpoints.challenge.payload_manager import PayloadManager
-from api.endpoints.challenge.schemas import MinerInput, MinerOutput
+from api.endpoints.challenge.schemas import (
+    MinerOutput,
+    PayloadRequest,
+    ScoreResponse,
+)
 from api.logger import logger
 
-payload_manager = PayloadManager()
-_latest_result_lock = threading.Lock()
-CategoryScores = Dict[str, float]
-FeedbackCategories = Dict[str, str]
-LatestResultValue = Union[float, str, bool, None, FeedbackCategories]
 
+@dataclass
+class _PendingSession:
+    event: threading.Event
+    score: Union[float, None] = None
+    category_scores: Dict[str, float] = field(default_factory=dict)
+    feedback: Union[str, None] = None
+
+
+_pending_lock = threading.Lock()
+_pending_sessions: Dict[str, _PendingSession] = {}
+
+_latest_result_lock = threading.Lock()
+LatestResultValue = Union[float, str, None, Dict[str, float]]
 _latest_result: Dict[str, LatestResultValue] = {
+    "session_id": None,
     "score": None,
     "feedback": "",
     "phase": "not_started",
-    "simple_bot_passed": None,
     "category_scores": {},
 }
+
+
 def _set_latest_result(
     *,
+    session_id: str,
     score: float,
     feedback: str,
     phase: str,
-    simple_bot_passed: bool | None,
-    category_scores: FeedbackCategories | None = None,
+    category_scores: Union[Dict[str, float], None] = None,
 ) -> None:
     with _latest_result_lock:
         _latest_result.update(
             {
+                "session_id": session_id,
                 "score": score,
                 "feedback": feedback,
                 "phase": phase,
-                "simple_bot_passed": simple_bot_passed,
-                "category_scores": category_scores or {},
+                "category_scores": dict(category_scores or {}),
             }
         )
-
-
-def _feedback_band(score: float) -> str:
-    if score < 0.40:
-        return "weak"
-    if score < 0.65:
-        return "needs_attention"
-    if score < 0.85:
-        return "good"
-    return "strong"
-
-
-def _miner_feedback(category_scores: CategoryScores) -> FeedbackCategories:
-    feedback = {
-        category: _feedback_band(score)
-        for category, score in category_scores.items()
-        if category in {"session", "client", "activity"}
-    }
-    if "limit" in category_scores:
-        feedback["limit"] = "applied"
-    return feedback
 
 
 def get_result() -> Dict[str, LatestResultValue]:
@@ -74,164 +66,95 @@ def get_result() -> Dict[str, LatestResultValue]:
         return dict(_latest_result)
 
 
-def get_task() -> MinerInput:
-    return MinerInput()
+def _register_session(session_id: str) -> _PendingSession:
+    pending = _PendingSession(event=threading.Event())
+    with _pending_lock:
+        _pending_sessions[session_id] = pending
+    return pending
+
+
+def _unregister_session(session_id: str) -> None:
+    with _pending_lock:
+        _pending_sessions.pop(session_id, None)
 
 
 @validate_call
-def score(miner_output: MinerOutput) -> float:
-    """Build, verify, and score one miner submission."""
-    simple_bot_check_enabled = config.challenge.simple_bot_check_enabled
-    web_check_enabled = config.challenge.web_check_enabled
-    if not simple_bot_check_enabled and not web_check_enabled:
-        raise ValueError(
-            "At least one of simple_bot_check_enabled or web_check_enabled must be enabled"
-        )
+def score(miner_output: MinerOutput) -> ScoreResponse:
+    session_id = uuid.uuid4().hex
+    logger.info(f"[{session_id}] starting score run")
+    pending = _register_session(session_id)
+    try:
+        bot_py = miner_output.get_file("bot.py")
+        dockerfile = miner_output.get_file("Dockerfile")
 
-    expected_sessions = config.challenge.n_run_per_ch
-    required_tasks = expected_sessions
-    score_job_id = uuid.uuid4().hex
-    bot_py = miner_output.get_file("bot.py")
-    dockerfile = miner_output.get_file("Dockerfile")
-
-    with payload_manager.run_lock:
         try:
-            challenge_utils.send_build_request(bot_py, dockerfile, score_job_id)
+            challenge_utils.send_build_request(bot_py, dockerfile, session_id)
         except Exception as err:
-            logger.error(f"Failed to build miner container: {err}")
+            logger.error(f"[{session_id}] build failed: {err}")
             _set_latest_result(
+                session_id=session_id,
                 score=0.0,
                 feedback="failed to build miner container",
                 phase="build",
-                simple_bot_passed=None,
             )
-            return 0.0
+            return ScoreResponse(session_id=session_id, score=0.0)
 
-        simple_bot_passed: bool | None = None
-        if simple_bot_check_enabled:
-            try:
-                simple_result = challenge_utils.send_run_simple_bot_request(score_job_id)
-            except Exception as err:
-                logger.error(f"Simple bot detection phase failed: {err}")
-                _set_latest_result(
-                    score=0.0,
-                    feedback="failed in simple bot detection phase",
-                    phase="simple_bot",
-                    simple_bot_passed=False,
-                )
-                return 0.0
-
-            simple_bot_passed = simple_result.get("passed", True) is True
-            if not simple_bot_passed:
-                logger.info(f"Simple bot detection rejected miner: {simple_result}")
-                _set_latest_result(
-                    score=0.0,
-                    feedback="failed in simple bot detection phase",
-                    phase="simple_bot",
-                    simple_bot_passed=False,
-                )
-                return 0.0
-        else:
-            logger.info("Simple bot detection phase skipped by config")
-
-        if not web_check_enabled:
-            logger.info("Web scoring phase skipped by config")
+        try:
+            challenge_utils.send_run_web_request(session_id)
+        except Exception as err:
+            logger.error(f"[{session_id}] runner failed: {err}")
             _set_latest_result(
-                score=1.0,
-                feedback="simple bot detection completed; web scoring skipped",
-                phase="simple_bot",
-                simple_bot_passed=simple_bot_passed,
+                session_id=session_id,
+                score=0.0,
+                feedback="failed to run miner container",
+                phase="run",
             )
-            return 1.0
+            return ScoreResponse(session_id=session_id, score=0.0)
 
-        if (
-            not payload_manager.has_remaining_tasks()
-            or payload_manager.remaining_task_count() < required_tasks
-        ):
-            payload_manager.reset()
-        if payload_manager.pop_task() is None:
-            raise BaseHTTPException(
-                error_enum=ErrorCodeEnum.TOO_MANY_REQUESTS,
-                message="No initialized key pairs, or out of tasks!",
+        signaled = pending.event.wait(timeout=config.challenge.bot_timeout)
+        if signaled and pending.score is not None:
+            final_score = float(pending.score)
+            feedback = pending.feedback or "scored"
+            phase = "completed"
+            category_scores = pending.category_scores
+            logger.info(f"[{session_id}] scorer returned {final_score}")
+        else:
+            final_score = float(config.challenge.session_timeout_score)
+            feedback = "scorer timed out"
+            phase = "timeout"
+            category_scores = {}
+            logger.warning(
+                f"[{session_id}] no scorer callback within {config.challenge.bot_timeout}s"
             )
 
-        runner_failed = challenge_utils.run_web_phase(
-            payload_manager,
-            session_count=expected_sessions,
-            score_job_id=score_job_id,
-        )
-        final_score = payload_manager.finalize(
-            timeout_score=config.challenge.session_timeout_score
-        )
-        category_scores = payload_manager.finalize_category_scores()
-        logger.info(f"[run {payload_manager.run_id}] Final score: {final_score}")
         _set_latest_result(
-            score=float(final_score),
-            feedback=(
-                "failed in web scoring phase"
-                if runner_failed
-                else "web scoring completed"
-            ),
-            phase="web",
-            simple_bot_passed=simple_bot_passed,
-            category_scores=_miner_feedback(category_scores),
+            session_id=session_id,
+            score=final_score,
+            feedback=feedback,
+            phase=phase,
+            category_scores=category_scores,
         )
-        return float(final_score)
+        return ScoreResponse(session_id=session_id, score=final_score)
+    finally:
+        _unregister_session(session_id)
 
 
 @validate_call
-def get_random_val(nonce: str) -> str:
-    with payload_manager.claim_lock:
-        current = payload_manager.cur_key_pair
-        if not current:
-            raise BaseHTTPException(
-                error_enum=ErrorCodeEnum.BAD_REQUEST,
-                message="No initialized key pair or out of keys.",
-            )
-        if current.nonce != nonce:
-            raise BaseHTTPException(
-                error_enum=ErrorCodeEnum.UNAUTHORIZED,
-                message="Invalid nonce value!",
-            )
-        if not current.public_key:
-            raise BaseHTTPException(
-                error_enum=ErrorCodeEnum.TOO_MANY_REQUESTS,
-                message="Nonce is already retrieved!",
-            )
-        public_key = payload_manager.get_nonce()
-        payload_manager.pop_task()
-        return public_key
-
-
-def _score_payload(plain_data: dict) -> tuple[float, Dict[str, float]]:
-    try:
-        shape_ok, shape_reason = scoring.validate_shape(plain_data)
-        if not shape_ok:
-            logger.info(f"Layer 1 shape check rejected session: {shape_reason}")
-            return config.challenge.gate_fail_score, {}
-        return scoring.score_with_metrics_processor_details(
-            data=plain_data,
-            error_score=config.challenge.metrics_processor_error_score,
+def record_payload(payload: PayloadRequest) -> None:
+    with _pending_lock:
+        pending = _pending_sessions.get(payload.session_id)
+    if pending is None:
+        raise BaseHTTPException(
+            error_enum=ErrorCodeEnum.NOT_FOUND,
+            message="Unknown or expired session_id",
         )
-    except Exception as err:
-        logger.error(f"Unexpected scoring error; recording error score: {err}")
-        return config.challenge.metrics_processor_error_score, {}
-
-
-@validate_call
-def eval_bot(data: str, trusted_request: dict | None = None) -> None:
-    outcome = payload_manager.process_eval(
-        data,
-        decrypt_fn=challenge_utils.decrypt,
-        score_fn=_score_payload,
-        trusted_context=trusted_request,
+    pending.score = payload.score
+    pending.category_scores = dict(payload.category_scores)
+    pending.feedback = payload.feedback
+    pending.event.set()
+    logger.info(
+        f"[{payload.session_id}] scorer POSTed score={payload.score}"
     )
-    if outcome.status == "recorded":
-        logger.info(f"Recorded session {outcome.session_id} score: {outcome.score}")
-    elif outcome.status == "duplicate":
-        logger.warning(f"Duplicate /_eval for session {outcome.session_id}")
-    else:
-        logger.warning("Unattributable /_eval payload; ignoring")
 
 
-__all__ = ["get_task", "get_random_val", "score", "get_result", "eval_bot"]
+__all__ = ["score", "record_payload", "get_result"]

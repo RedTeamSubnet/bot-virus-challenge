@@ -12,9 +12,8 @@ services:
       TERM: ${TERM:-xterm}
       TZ: ${TZ:-Asia/Seoul}
       BV_CHALLENGE_API_PORT: ${BV_CHALLENGE_API_PORT:-10001}
-      BV_CHALLENGE_API_BOT_RUNNER_URL: ${BV_CHALLENGE_API_BOT_RUNNER_URL:-http://bot-runner:8000}
-      BV_CHALLENGE_API_BOT_RUNNER_SESSION_COUNT: ${BV_CHALLENGE_API_BOT_RUNNER_SESSION_COUNT:-2}
-      BV_CHALLENGE_API_BOT_RUNNER_REQUEST_TIMEOUT_SEC: ${BV_CHALLENGE_API_BOT_RUNNER_REQUEST_TIMEOUT_SEC:-900}
+      BV_CHALLENGE_VM_ENDPOINT: ${BV_CHALLENGE_VM_ENDPOINT:-http://bot-runner:8000}
+      BV_CHALLENGE_BOT_TIMEOUT: ${BV_CHALLENGE_BOT_TIMEOUT:-120}
     env_file:
       - path: .env
         required: false
@@ -32,12 +31,12 @@ services:
     restart: unless-stopped
     networks:
       - bot-virus-challenge-net
+      - bot-virus-internal-net
     environment:
       TERM: ${TERM:-xterm}
       TZ: ${TZ:-UTC}
       VM_RUNNER_API_PORT: ${VM_RUNNER_API_PORT:-8000}
       DOCKER_HOST: unix:///docker-socket/docker.sock
-      CHALLENGE_HTTPS_PROXY_PORT: ${CHALLENGE_HTTPS_PROXY_PORT:-10443}
       MDM_CHALLENGE_COMMIT_DIR: /commit
     env_file:
       - path: .env
@@ -57,18 +56,63 @@ services:
     restart: unless-stopped
     networks:
       - bot-virus-challenge-net
+      - bot-virus-internal-net
     privileged: true
     environment:
       DOCKER_TLS_CERTDIR: ""
-      CHALLENGE_HTTPS_PROXY_PORT: ${CHALLENGE_HTTPS_PROXY_PORT:-10443}
     volumes:
       - "bot-runner-dind-socket:/docker-socket"
       - "bot-runner-dind-data:/var/lib/docker"
       - "./src/bv_challenge/challenge/commit:/commit:ro"
+  scorer:
+    image: redteamsubnet61/rest-rt-score:4.3.7-260909
+    platform: linux/amd64
+    build:
+      context: ./src/modules/rt-score
+    restart: unless-stopped
+    networks:
+      - bot-virus-challenge-net
+      - bot-virus-internal-net
+    environment:
+      TERM: ${TERM:-xterm}
+      TZ: ${TZ:-UTC}
+      RTS_API_PORT: ${RTS_API_PORT:-8000}
+      CHALLENGE_API_URL: ${CHALLENGE_API_URL:-http://challenge-api:10001}
+      CHALLENGE_API_KEY: ${BV_CHALLENGE_API_KEY}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - "./volumes/configs/rest-rt-score:${RTS_API_CONFIGS_DIR:-/etc/rest-rt-score}"
+      - "./volumes/storage/rest-rt-score/logs:${RTS_API_LOGS_DIR:-/var/log/rest-rt-score}"
+      - "./volumes/storage/rest-rt-score/data:${RTS_API_DATA_DIR:-/var/lib/rest-rt-score}"
+    expose:
+      - "${RTS_API_PORT:-8000}"
+    tty: true
+  web-page:
+    image: redteamsubnet61/web-rt-login-page:0.1.0-261110
+    build:
+      context: ./src/modules/web-page
+    restart: unless-stopped
+    networks:
+      - bot-virus-internal-net
+    environment:
+      TZ: ${TZ:-UTC}
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${WEB_PAGE_PORT:-3000}:80"
+    depends_on:
+      - scorer
 networks:
   bot-virus-challenge-net:
     name: bot-virus-challenge-net
     driver: bridge
+  bot-virus-internal-net:
+    name: bot-virus-internal-net
+    driver: bridge
+    internal: true
 volumes:
   bot-runner-dind-socket:
   bot-runner-dind-data:

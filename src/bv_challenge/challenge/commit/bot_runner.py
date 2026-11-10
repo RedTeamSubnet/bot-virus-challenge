@@ -10,14 +10,6 @@ from bot.bot import run_bot
 logger = logging.getLogger(__name__)
 
 
-def _session_count() -> int:
-    """Return the platform-requested number of bot sessions."""
-    try:
-        return max(1, int(os.getenv("BV_SESSION_COUNT", "1")))
-    except (TypeError, ValueError):
-        return 1
-
-
 def main() -> None:
     logging.basicConfig(
         stream=sys.stdout,
@@ -30,23 +22,13 @@ def main() -> None:
         logger.error("CHALLENGE_WEB_URL is required")
         raise SystemExit(1)
 
-    session_count = _session_count()
-    logger.info("Running %s session(s) against %s", session_count, web_url)
-    successful_sessions = 0
-    for index in range(session_count):
-        logger.info("Session %s/%s", index + 1, session_count)
-        if run_bot(web_url):
-            successful_sessions += 1
-
-    if successful_sessions != session_count:
-        logger.error(
-            "Completed %s/%s requested session(s).",
-            successful_sessions,
-            session_count,
-        )
+    session_id = os.getenv("SESSION_ID", "")
+    logger.info("[%s] running against %s", session_id or "no-session", web_url)
+    if not run_bot(web_url):
+        logger.error("[%s] bot run failed", session_id or "no-session")
         raise SystemExit(1)
 
-    logger.info("Done!")
+    logger.info("[%s] done", session_id or "no-session")
 
 
 if __name__ == "__main__":

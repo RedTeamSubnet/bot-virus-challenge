@@ -6,6 +6,8 @@ import contextlib
 import json
 import logging
 import os
+import random
+import string
 from pathlib import Path
 import subprocess
 import time
@@ -18,10 +20,19 @@ _SCREEN = (1440, 900)
 _XVFB_BIN = "/usr/bin/Xvfb"
 _CHANNEL = "bvstate"
 
+_TARGET_NAMES = (
+    "click-here-1",
+    "click-here-2",
+    "click-here-3",
+    "username",
+    "password",
+    "submit",
+)
+_MIN_INPUT_LEN = 16
+
 # Runs before any page script. It keeps the only reference to the native
 # message port inside this closure -- nothing is published on `window` -- and
-# reports the control geometry and the submission flag as they happen instead
-# of answering repeated queries from the host.
+# reports target geometries plus a submission flag as they change.
 _PAGE_AGENT = """
 (() => {
   let post;
@@ -62,28 +73,35 @@ _PAGE_AGENT = """
     });
   } catch (_) {}
 
-  let lastKey = "";
-  const measure = () => {
-    if (window.BV_SUBMITTED === true) { settle(); }
-    const el = document.getElementById("verify-button")
-      || document.querySelector(".verify-button")
-      || document.querySelector(
-        "button, [role=button], input[type=button], input[type=submit]"
-      );
+  const TARGETS = %(targets)s;
+  const lastKey = {};
+
+  const measureOne = (name) => {
+    const el = document.querySelector("#" + name);
     if (!el) { return; }
     const r = el.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) { return; }
-    const key = r.left + ":" + r.top + ":" + r.width + ":" + r.height;
-    if (key === lastKey) { return; }
-    lastKey = key;
+    const key = r.left + ":" + r.top + ":" + r.width + ":" + r.height
+      + ":" + (el.disabled ? "d" : "e");
+    if (key === lastKey[name]) { return; }
+    lastKey[name] = key;
     post(JSON.stringify({
       target: {
+        name: name,
         x: r.left + r.width / 2,
         y: r.top + r.height / 2,
         w: r.width,
         h: r.height,
+        disabled: !!el.disabled,
       },
     }));
+  };
+
+  const measure = () => {
+    if (window.BV_SUBMITTED === true) { settle(); }
+    for (const name of TARGETS) { measureOne(name); }
+    const status = document.querySelector(".status");
+    if (status && /submit/i.test(status.textContent || "")) { settle(); }
   };
 
   const watch = () => {
@@ -158,12 +176,7 @@ def _parse_json(value: Any) -> Any:
 
 
 class _Pointer:
-    """Feeds pointer events straight into the toolkit's own event queue.
-
-    The widget receives exactly what a physical device would deliver, so the
-    engine builds trusted DOM events from them, and nothing is ever handed to
-    the display server as a synthetic request.
-    """
+    """Feeds pointer events straight into the toolkit's own event queue."""
 
     def __init__(self, view) -> None:
         self._view = view
@@ -218,6 +231,48 @@ class _Pointer:
         return self._emit(Gdk.EventType.BUTTON_RELEASE, x, y, button=1)
 
 
+class _Keyboard:
+    """Delivers key events through the same path a physical keyboard would."""
+
+    def __init__(self, view) -> None:
+        self._view = view
+        seat = Gdk.Display.get_default().get_default_seat()
+        self._device = seat.get_keyboard() if seat else None
+        if self._device is None:
+            raise RuntimeError("no keyboard device on the default seat")
+
+    def _emit(self, kind, keyval: int, state: int = 0) -> bool:
+        surface = self._view.get_window()
+        if surface is None:
+            return False
+        event = Gdk.Event.new(kind)
+        event.window = surface
+        event.send_event = 0
+        event.time = int(time.monotonic() * 1000) & 0xFFFFFFFF
+        event.keyval = keyval
+        event.hardware_keycode = 0
+        event.group = 0
+        event.state = state
+        event.set_device(self._device)
+        event.set_source_device(self._device)
+        Gtk.main_do_event(event)
+        return True
+
+    def tap(self, char: str) -> bool:
+        if not char:
+            return False
+        state = 0
+        if char.isupper():
+            state = Gdk.ModifierType.SHIFT_MASK
+            keyval = ord(char.lower())
+        else:
+            keyval = ord(char)
+        if not self._emit(Gdk.EventType.KEY_PRESS, keyval, state):
+            return False
+        _pump(0.01 + random.uniform(0.0, 0.03))
+        return self._emit(Gdk.EventType.KEY_RELEASE, keyval, state)
+
+
 class _Browser:
     def __init__(self) -> None:
         ready = Gtk.init_check()
@@ -226,7 +281,7 @@ class _Browser:
 
         self._load_done = False
         self._load_failed = False
-        self.target: tuple[float, float] | None = None
+        self.targets: dict[str, dict[str, Any]] = {}
         self.submitted = False
 
         context = WebKit2.WebContext()
@@ -239,9 +294,13 @@ class _Browser:
             f"script-message-received::{_CHANNEL}",
             self._on_page_message,
         )
+        script = _PAGE_AGENT % {
+            "channel": _CHANNEL,
+            "targets": json.dumps(list(_TARGET_NAMES)),
+        }
         content_manager.add_script(
             WebKit2.UserScript(
-                _PAGE_AGENT % {"channel": _CHANNEL},
+                script,
                 WebKit2.UserContentInjectedFrames.ALL_FRAMES,
                 WebKit2.UserScriptInjectionTime.START,
                 None,
@@ -268,6 +327,11 @@ class _Browser:
         _pump(0.4)
 
         self.pointer = _Pointer(self._view)
+        self.keyboard = _Keyboard(self._view)
+
+    @property
+    def view(self):
+        return self._view
 
     def _on_page_message(self, _manager, result) -> None:
         try:
@@ -280,8 +344,8 @@ class _Browser:
         if report.get("submitted") is True:
             self.submitted = True
         spot = report.get("target")
-        if isinstance(spot, dict) and {"x", "y"} <= spot.keys():
-            self.target = (float(spot["x"]), float(spot["y"]))
+        if isinstance(spot, dict) and {"name", "x", "y"} <= spot.keys():
+            self.targets[str(spot["name"])] = spot
 
     def _on_load_changed(self, _view, event) -> None:
         if event == WebKit2.LoadEvent.FINISHED:
@@ -304,13 +368,23 @@ class _Browser:
             _pump(0.05)
         return self._load_done and not self._load_failed
 
-    def await_target(self, timeout: float) -> tuple[float, float] | None:
+    def await_target(self, name: str, timeout: float) -> dict[str, Any] | None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self.target is not None:
-                return self.target
+            spot = self.targets.get(name)
+            if spot is not None:
+                return spot
             _pump(0.05)
         return None
+
+    def await_enabled(self, name: str, timeout: float) -> dict[str, Any] | None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            spot = self.targets.get(name)
+            if spot and not spot.get("disabled"):
+                return spot
+            _pump(0.05)
+        return self.targets.get(name)
 
     def await_submission(self, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
@@ -321,7 +395,6 @@ class _Browser:
         return self.submitted
 
     def confirm_submission(self, timeout: float = 1.5) -> bool:
-        """Last-resort read, used only when no report ever arrived."""
         box: dict[str, Any] = {"done": False, "value": None}
 
         def finished(view, result, _data=None) -> None:
@@ -335,7 +408,12 @@ class _Browser:
                 box["done"] = True
 
         self._view.run_javascript(
-            "JSON.stringify({ok: window.BV_SUBMITTED === true})", None, finished, None
+            "JSON.stringify({ok: window.BV_SUBMITTED === true "
+            "|| /submit/i.test((document.querySelector('.status')||{}).textContent||'')"
+            "})",
+            None,
+            finished,
+            None,
         )
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline and not box["done"]:
@@ -364,7 +442,7 @@ def _reach(pointer: _Pointer, x: float, y: float) -> bool:
     return True
 
 
-def _click(pointer: _Pointer, x: float, y: float) -> bool:
+def _click_at(pointer: _Pointer, x: float, y: float) -> bool:
     if not _reach(pointer, x, y):
         return False
     _pump(0.1)
@@ -372,6 +450,40 @@ def _click(pointer: _Pointer, x: float, y: float) -> bool:
         return False
     _pump(0.07)
     return pointer.release()
+
+
+def _type_text(keyboard: _Keyboard, text: str) -> bool:
+    for ch in text:
+        if not keyboard.tap(ch):
+            return False
+        _pump(0.04 + random.uniform(0.0, 0.05))
+    return True
+
+
+def _random_text(length: int) -> str:
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(random.choice(alphabet) for _ in range(length))
+
+
+def _click_target(browser: _Browser, name: str, timeout: float = 6.0) -> bool:
+    spot = browser.await_target(name, timeout)
+    if spot is None:
+        logger.warning("target %s not found", name)
+        return False
+    return _click_at(browser.pointer, float(spot["x"]), float(spot["y"]))
+
+
+def _fill_input(
+    browser: _Browser, name: str, text: str, timeout: float = 6.0
+) -> bool:
+    spot = browser.await_target(name, timeout)
+    if spot is None:
+        logger.warning("input %s not found", name)
+        return False
+    if not _click_at(browser.pointer, float(spot["x"]), float(spot["y"])):
+        return False
+    _pump(0.15)
+    return _type_text(browser.keyboard, text)
 
 
 def _run_once(url: str) -> bool:
@@ -385,18 +497,36 @@ def _run_once(url: str) -> bool:
             return False
 
         _pump(1.1)
-        spot = browser.await_target(6.0)
-        if spot is None:
-            return browser.await_submission(15.0) or browser.confirm_submission()
+
+        for corner in ("click-here-1", "click-here-2", "click-here-3"):
+            if not _click_target(browser, corner, timeout=8.0):
+                return browser.await_submission(5.0) or browser.confirm_submission()
+            _pump(0.3)
+
+        username = _random_text(_MIN_INPUT_LEN + random.randint(2, 6))
+        password = _random_text(_MIN_INPUT_LEN + random.randint(2, 6))
+
+        if not _fill_input(browser, "username", username):
+            return browser.await_submission(5.0) or browser.confirm_submission()
+        _pump(0.25)
+        if not _fill_input(browser, "password", password):
+            return browser.await_submission(5.0) or browser.confirm_submission()
+        _pump(0.35)
+
+        submit_spot = browser.await_enabled("submit", timeout=4.0)
+        if submit_spot is None:
+            return browser.await_submission(5.0) or browser.confirm_submission()
 
         for _ in range(3):
-            if not _click(browser.pointer, *spot):
+            if not _click_at(
+                browser.pointer, float(submit_spot["x"]), float(submit_spot["y"])
+            ):
                 break
-            if browser.await_submission(5.0):
+            if browser.await_submission(4.0):
                 return True
-            spot = browser.target or spot
+            submit_spot = browser.targets.get("submit") or submit_spot
 
-        return browser.await_submission(15.0) or browser.confirm_submission()
+        return browser.await_submission(10.0) or browser.confirm_submission()
     finally:
         browser.close()
 
