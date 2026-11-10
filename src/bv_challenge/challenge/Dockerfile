@@ -141,7 +141,6 @@ FROM base AS app
 WORKDIR "${BV_CHALLENGE_API_DIR}"
 COPY --chown=${UID}:${GID} ./api ${BV_CHALLENGE_API_DIR}/api
 COPY --chown=${UID}:${GID} ./commit ${BV_CHALLENGE_API_DIR}/commit
-COPY --chown=${UID}:${GID} ./templates ${BV_CHALLENGE_API_DIR}/templates
 COPY --chown=${UID}:${GID} --chmod=770 ./scripts/*.sh /usr/local/bin/
 
 # VOLUME ["${BV_CHALLENGE_API_DATA_DIR}"]

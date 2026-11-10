@@ -1,14 +1,9 @@
 # -*- coding: utf-8 -*-
 
-import hashlib
-import pathlib
 import threading
 import uuid
 from typing import Dict, Union
 
-from fastapi import Request
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from pydantic import validate_call
 
 from api.config import config
@@ -20,7 +15,6 @@ from api.endpoints.challenge.payload_manager import PayloadManager
 from api.endpoints.challenge.schemas import MinerInput, MinerOutput
 from api.logger import logger
 
-_SRC_DIR = pathlib.Path(__file__).parent.parent.parent.parent.resolve()
 payload_manager = PayloadManager()
 _latest_result_lock = threading.Lock()
 CategoryScores = Dict[str, float]
@@ -34,9 +28,6 @@ _latest_result: Dict[str, LatestResultValue] = {
     "simple_bot_passed": None,
     "category_scores": {},
 }
-SCHEMA_VERSION = "2"
-
-
 def _set_latest_result(
     *,
     score: float,
@@ -188,45 +179,6 @@ def score(miner_output: MinerOutput) -> float:
         return float(final_score)
 
 
-def _short_digest(*parts: str) -> str:
-    hasher = hashlib.sha256()
-    for part in parts:
-        hasher.update((part or "").encode("utf-8"))
-        hasher.update(b"\x00")
-    return hasher.hexdigest()[:16]
-
-
-@validate_call(config={"arbitrary_types_allowed": True})
-def get_web(request: Request) -> HTMLResponse:
-    if not config.challenge.web_check_enabled:
-        raise BaseHTTPException(
-            error_enum=ErrorCodeEnum.BAD_REQUEST,
-            message="Web check is disabled",
-        )
-
-    nonce, public_key, active = payload_manager.claim_web_key()
-    if not active:
-        logger.warning(
-            "/_web called with no active session key; serving a throwaway key"
-        )
-    templates = Jinja2Templates(directory=_SRC_DIR / "./templates/html")
-    return templates.TemplateResponse(
-        request=request,
-        name="index.html",
-        context={
-            "session_id": nonce,
-            "nonce": nonce,
-            "public_key": public_key,
-            "public_key_id": _short_digest(public_key),
-            "config_hash": _short_digest(
-                SCHEMA_VERSION,
-                str(config.api.security.asymmetric.key_size),
-            ),
-            "schema_version": SCHEMA_VERSION,
-        },
-    )
-
-
 @validate_call
 def get_random_val(nonce: str) -> str:
     with payload_manager.claim_lock:
@@ -282,4 +234,4 @@ def eval_bot(data: str, trusted_request: dict | None = None) -> None:
         logger.warning("Unattributable /_eval payload; ignoring")
 
 
-__all__ = ["get_task", "get_web", "get_random_val", "score", "get_result", "eval_bot"]
+__all__ = ["get_task", "get_random_val", "score", "get_result", "eval_bot"]
