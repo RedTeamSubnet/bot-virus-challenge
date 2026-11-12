@@ -18,6 +18,7 @@ def _post_vm_request(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             json=payload,
             timeout=timeout,
             verify=config.challenge.vm_ssl_verify,
+            headers={"X-API-Key": config.challenge.vm_api_key.get_secret_value()},
         )
         if response.status_code != 200:
             raise ValueError(
