@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Dict, Optional
 
-from pydantic import BaseModel, Field, constr, field_validator
+from pydantic import BaseModel, Field, confloat, constr, field_validator
 
 from api.core.constants import ALPHANUM_REGEX
 
@@ -101,9 +101,13 @@ class PayloadRequest(BaseModel):
         title="Session ID",
         description="Session identifier the scorer received for the run.",
     )
-    score: float = Field(..., ge=0.0, le=1.0, title="Score")
-    category_scores: Dict[str, float] = Field(
+    score: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False, title="Score")
+    category_scores: Dict[
+        constr(min_length=1, max_length=32),  # type: ignore
+        confloat(ge=0.0, le=1.0, allow_inf_nan=False),  # type: ignore
+    ] = Field(
         default_factory=dict,
+        max_length=16,
         title="Category Scores",
         description="Per-category breakdown of the score; passed through to /result.",
     )

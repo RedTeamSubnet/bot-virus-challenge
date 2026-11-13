@@ -148,10 +148,17 @@ def record_payload(payload: PayloadRequest) -> None:
             error_enum=ErrorCodeEnum.NOT_FOUND,
             message="Unknown or expired session_id",
         )
-    pending.score = payload.score
-    pending.category_scores = dict(payload.category_scores)
-    pending.feedback = payload.feedback
-    pending.event.set()
+    with _pending_lock:
+        # First result wins: a later callback must not replace a reported score.
+        if pending.event.is_set():
+            raise BaseHTTPException(
+                error_enum=ErrorCodeEnum.CONFLICT,
+                message="A score was already recorded for this session_id",
+            )
+        pending.score = payload.score
+        pending.category_scores = dict(payload.category_scores)
+        pending.feedback = payload.feedback
+        pending.event.set()
     logger.info(
         f"[{payload.session_id}] scorer POSTed score={payload.score}"
     )
