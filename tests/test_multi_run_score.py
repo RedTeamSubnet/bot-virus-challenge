@@ -21,7 +21,6 @@ def _challenge(**over):
     base = dict(
         runs_per_submission=8,
         reject_below=0.5,
-        score_aggregation="min",
         bot_timeout=1,
         session_timeout_score=0.0,
         scorer_endpoint=None,
@@ -74,7 +73,6 @@ def _use(monkeypatch, **over):
 def test_yaml_runs_ten_sessions_and_takes_the_worst() -> None:
     assert config.challenge.runs_per_submission == 10
     assert config.challenge.reject_below == 0.5
-    assert config.challenge.score_aggregation == "min"
 
 
 def test_all_sessions_pass_the_worst_session_decides(monkeypatch, runner) -> None:
@@ -97,17 +95,17 @@ def test_a_detected_session_rejects_the_submission_and_stops(
     monkeypatch, runner
 ) -> None:
     _use(monkeypatch)
-    runner["script"] = [0.95, 0.94, 0.45, 0.95, 0.95, 0.95, 0.95, 0.95]
+    runner["script"] = [0.95, 0.94, 0.4, 0.95, 0.95, 0.95, 0.95, 0.95]
     out = service.score(MINER)
     assert out.score == 0.0
     assert len(runner["runs"]) == 3
     res = service._full_result()
     assert res["phase"] == "rejected"
-    assert "session 3/8" in res["feedback"] and "0.450" in res["feedback"]
-    assert [s["score"] for s in res["sessions"]] == [0.95, 0.94, 0.45]
+    assert "session 3/8" in res["feedback"] and "0.400" in res["feedback"]
+    assert [s["score"] for s in res["sessions"]] == [0.95, 0.94, 0.4]
 
 
-def test_a_hard_fail_on_the_first_session_skips_every_other_run(
+def test_a_zero_on_the_first_session_skips_every_other_run(
     monkeypatch, runner
 ) -> None:
     _use(monkeypatch)
@@ -138,10 +136,14 @@ def test_build_failure_runs_nothing(monkeypatch, runner) -> None:
     assert runner["runs"] == [] and service._full_result()["phase"] == "build"
 
 
-def test_mean_aggregation_is_available(monkeypatch, runner) -> None:
-    _use(monkeypatch, runs_per_submission=4, score_aggregation="mean")
-    runner["script"] = [0.9, 0.8, 1.0, 0.7]
-    assert service.score(MINER).score == pytest.approx(0.85)
+def test_a_timed_out_session_keeps_the_timeout_score_and_phase(
+    monkeypatch, runner
+) -> None:
+    # A timeout is not a detection: `session_timeout_score`, phase "timeout".
+    _use(monkeypatch, session_timeout_score=0.2)
+    runner["script"] = [0.95, "timeout"] + [0.95] * 6
+    assert service.score(MINER).score == pytest.approx(0.2)
+    assert service._full_result()["phase"] == "timeout"
 
 
 def test_one_run_keeps_the_old_single_session_behaviour(monkeypatch, runner) -> None:
@@ -166,7 +168,7 @@ def test_sessions_are_unregistered_after_the_run(monkeypatch, runner) -> None:
 def scorer(monkeypatch):
     state = {
         "calls": [],
-        "verdict": {"level": "no_significant_findings", "score_cap": None},
+        "verdict": {"level": "clear", "score_cap": None},
         "exc": None,
     }
 
@@ -185,7 +187,7 @@ def test_sessions_that_pass_alone_but_show_automation_together_are_rejected(
 ) -> None:
     _use(monkeypatch, scorer_endpoint="http://scorer:8000")
     runner["script"] = [0.93] * 8
-    scorer["verdict"] = {"level": "automation_supported", "score_cap": 0.45}
+    scorer["verdict"] = {"level": "flagged", "score_cap": 0.4}
     assert service.score(MINER).score == 0.0
     res = service._full_result()
     assert res["phase"] == "rejected" and "together show automation" in res["feedback"]
@@ -205,15 +207,15 @@ def test_clean_comparison_keeps_the_worst_session_score(
 def test_a_cap_above_the_reject_line_only_caps(monkeypatch, runner, scorer) -> None:
     _use(monkeypatch, scorer_endpoint="http://scorer:8000", reject_below=0.3)
     runner["script"] = [0.93] * 8
-    scorer["verdict"] = {"level": "automation_supported", "score_cap": 0.45}
-    assert service.score(MINER).score == pytest.approx(0.45)
+    scorer["verdict"] = {"level": "flagged", "score_cap": 0.4}
+    assert service.score(MINER).score == pytest.approx(0.4)
 
 
 def test_rejected_sessions_are_never_sent_for_comparison(
     monkeypatch, runner, scorer
 ) -> None:
     _use(monkeypatch, scorer_endpoint="http://scorer:8000")
-    runner["script"] = [0.95, 0.45] + [0.95] * 6
+    runner["script"] = [0.95, 0.4] + [0.95] * 6
     assert service.score(MINER).score == 0.0
     assert scorer["calls"] == []
 
@@ -241,20 +243,21 @@ def test_a_failed_comparison_is_an_error_not_a_score(
     with pytest.raises(BaseHTTPException) as err:
         service.score(MINER)
     assert err.value.status_code == 503
-    assert service._full_result()["phase"] == "infrastructure_error"
+    res = service._full_result()
+    assert res["phase"] == "infrastructure_error" and res["score"] is None
 
 
 @pytest.mark.parametrize(
     "status, data",
     [
         (503, None),
-        (200, {"runs": 7, "missing": 1, "level": "suspicious", "score_cap": None}),
+        (200, {"runs": 7, "missing": 1, "level": "unsure", "score_cap": None}),
         (
             200,
             {
                 "runs": 8,
                 "missing": 0,
-                "level": "automation_supported",
+                "level": "flagged",
                 "score_cap": 4.5,
             },
         ),
@@ -296,7 +299,7 @@ def test_compare_runs_refuses_untrustworthy_scorer_answers(
 
 def test_result_hides_detection_details_by_default(monkeypatch, runner) -> None:
     _use(monkeypatch)
-    runner["script"] = [0.95, 0.94, 0.45] + [0.95] * 5
+    runner["script"] = [0.95, 0.94, 0.4] + [0.95] * 5
     out = service.score(MINER)
     public = service.get_result()
     assert public == {
@@ -309,7 +312,7 @@ def test_result_hides_detection_details_by_default(monkeypatch, runner) -> None:
         "sessions": [],
     }
     # Nothing in the public result names a session or a score that was seen.
-    assert out.session_id not in str(public) and "0.45" not in str(public)
+    assert out.session_id not in str(public) and "0.4" not in str(public)
     assert len(service._full_result()["sessions"]) == 3
 
 
@@ -367,7 +370,7 @@ def test_the_retry_budget_is_per_submission(monkeypatch, runner) -> None:
 
 def test_a_scored_session_is_never_rerun(monkeypatch, runner) -> None:
     _use(monkeypatch, session_retries=1)
-    runner["script"] = [0.95, 0.45] + [0.95] * 6
+    runner["script"] = [0.95, 0.4] + [0.95] * 6
     assert service.score(MINER).score == 0.0
     assert len(runner["runs"]) == 2
 
@@ -381,21 +384,6 @@ def test_the_image_is_kept_while_a_retry_is_still_possible(monkeypatch, runner) 
     assert runner["runs"] == [True, True, True, False]
 
 
-def test_overlapping_submissions_are_refused(monkeypatch, runner) -> None:
-    from api.core.exceptions import BaseHTTPException
-
-    _use(monkeypatch)
-    runner["script"] = [0.95] * 8
-    assert service._score_lock.acquire(blocking=False)
-    try:
-        with pytest.raises(BaseHTTPException) as err:
-            service.score(MINER)
-        assert err.value.status_code == 429 and runner["builds"] == 0
-    finally:
-        service._score_lock.release()
-    assert service.score(MINER).score == pytest.approx(0.95)
-
-
 # ---- shadow mode --------------------------------------------------------------
 
 
@@ -404,7 +392,7 @@ def test_shadow_mode_compares_but_never_changes_the_score(
 ) -> None:
     _use(monkeypatch, scorer_endpoint="http://scorer:8000", runs_compare_mode="shadow")
     runner["script"] = [0.93] * 8
-    scorer["verdict"] = {"level": "automation_supported", "score_cap": 0.45}
+    scorer["verdict"] = {"level": "flagged", "score_cap": 0.4}
     assert service.score(MINER).score == pytest.approx(0.93)
     assert len(scorer["calls"]) == 1
     assert service._full_result()["phase"] == "completed"

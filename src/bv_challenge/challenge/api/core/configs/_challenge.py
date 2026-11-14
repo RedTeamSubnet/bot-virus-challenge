@@ -16,14 +16,11 @@ class ChallengeConfig(FrozenBaseConfig):
     runs_per_submission: int = Field(default=1, ge=1, le=20)
     # A session scoring below this means the scorer detected automation: the
     # submission is rejected (score 0.0) and the remaining runs are skipped.
-    # The detector's automation caps (0.0 / 0.35 / 0.45) all sit below 0.5.
     reject_below: float = Field(default=0.5, ge=0.0, le=1.0)
     # Sessions that time out or whose container fails may be re-run this many
     # times per SUBMISSION (not per session): one flaky run must not zero an
     # honest bot, and a bot must not get a fresh try for every bad session.
     session_retries: int = Field(default=1, ge=0, le=3)
-    # How completed sessions combine: "min" (the worst session decides) or "mean".
-    score_aggregation: Literal["min", "mean"] = Field(default="min")
     # What GET /result shows. "minimal": final score and a coarse phase only,
     # so a miner cannot tune a bot against per-session scores, category scores
     # or rejection reasons. "full": everything (local debugging only).

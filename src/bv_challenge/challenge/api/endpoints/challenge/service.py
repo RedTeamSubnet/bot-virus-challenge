@@ -27,10 +27,6 @@ class _PendingSession:
     feedback: Union[str, None] = None
 
 
-# One submission at a time: the runner has a single miner image and container
-# name, so two overlapping runs would build over and score each other.
-_score_lock = threading.Lock()
-
 _pending_lock = threading.Lock()
 _pending_sessions: Dict[str, _PendingSession] = {}
 
@@ -52,7 +48,7 @@ _latest_result: Dict[str, LatestResultValue] = {
 def _set_latest_result(
     *,
     session_id: str,
-    score: float,
+    score: Union[float, None],
     feedback: str,
     phase: str,
     category_scores: Union[Dict[str, float], None] = None,
@@ -172,13 +168,6 @@ def _run_session(session_id: str, keep_image: bool) -> _SessionOutcome:
         _unregister_session(session_id)
 
 
-def _aggregate(outcomes: List[_SessionOutcome]) -> float:
-    scores = [o.score for o in outcomes]
-    if config.challenge.score_aggregation == "mean":
-        return sum(scores) / len(scores)
-    return min(scores)
-
-
 def _compare_sessions(
     build_id: str, outcomes: List[_SessionOutcome]
 ) -> Union[float, None]:
@@ -204,7 +193,7 @@ def _compare_sessions(
         logger.error(f"[{build_id}] run comparison failed: {err}")
         _set_latest_result(
             session_id=build_id,
-            score=0.0,
+            score=None,
             feedback="run comparison unavailable; submission not scored",
             phase="infrastructure_error",
             runs=len(outcomes),
@@ -229,23 +218,14 @@ def score(miner_output: MinerOutput) -> ScoreResponse:
 
     Every run is a fresh session scored on its own. The first session below
     `reject_below` (automation detected, timeout or runner failure) rejects
-    the submission with 0.0 and skips the remaining runs. Otherwise the
-    sessions combine with `score_aggregation` ("min": the worst one decides),
-    after the scorer has compared them with each other (`scorer_endpoint`): a
-    bot can pass every session and still give itself away across sessions.
+    the submission and skips the remaining runs. Otherwise the worst session
+    decides, after the scorer has compared the sessions with each other
+    (`scorer_endpoint`): a bot can pass every session and still give itself
+    away across sessions.
+
+    Submissions are scored one at a time: the validator sends the next /score
+    only after this one returned, and /result holds a single latest result.
     """
-    if not _score_lock.acquire(blocking=False):
-        raise BaseHTTPException(
-            error_enum=ErrorCodeEnum.TOO_MANY_REQUESTS,
-            message="Another submission is being scored; retry later.",
-        )
-    try:
-        return _score_submission(miner_output)
-    finally:
-        _score_lock.release()
-
-
-def _score_submission(miner_output: MinerOutput) -> ScoreResponse:
     runs = config.challenge.runs_per_submission
     reject_below = config.challenge.reject_below
     build_id = uuid.uuid4().hex
@@ -296,9 +276,16 @@ def _score_submission(miner_output: MinerOutput) -> ScoreResponse:
             # The runner kept the image for a run that will not happen; its
             # next /build starts with a full cleanup.
             logger.info(f"[{build_id}] skipping {runs - n} remaining run(s)")
-        final_score = 0.0
         decisive = rejected
-        phase = "rejected" if rejected.phase == "completed" else rejected.phase
+        if rejected.phase == "completed":
+            # The scorer detected automation.
+            final_score = 0.0
+            phase = "rejected"
+        else:
+            # Timeout or runner failure: not a detection; keeps its own phase
+            # and score (`session_timeout_score` for a timeout).
+            final_score = rejected.score
+            phase = rejected.phase
         feedback = (
             f"rejected: session {n}/{runs} {rejected.phase} with score "
             f"{rejected.score:.3f} (< {reject_below}); {rejected.feedback}"
@@ -312,13 +299,13 @@ def _score_submission(miner_output: MinerOutput) -> ScoreResponse:
             # Deliberately coarse: which pattern gave the bot away stays private.
             feedback = f"rejected: the {runs} sessions together show automation"
         else:
-            final_score = _aggregate(outcomes)
+            final_score = decisive.score
             if cap is not None:
                 final_score = min(final_score, cap)
             phase = "completed"
             feedback = (
-                f"scored {runs} session(s), {config.challenge.score_aggregation}="
-                f"{final_score:.3f}; worst session: {decisive.feedback}"
+                f"scored {runs} session(s), min={final_score:.3f}; "
+                f"worst session: {decisive.feedback}"
             )
     logger.info(f"[{build_id}] final score {final_score} ({phase})")
     _set_latest_result(

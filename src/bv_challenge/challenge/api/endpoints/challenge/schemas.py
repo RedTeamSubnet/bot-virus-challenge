@@ -101,13 +101,10 @@ class PayloadRequest(BaseModel):
         title="Session ID",
         description="Session identifier the scorer received for the run.",
     )
-    score: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False, title="Score")
-    category_scores: Dict[
-        constr(min_length=1, max_length=32),  # type: ignore
-        confloat(ge=0.0, le=1.0, allow_inf_nan=False),  # type: ignore
-    ] = Field(
+    score: float = Field(..., ge=0.0, le=1.0, title="Score")
+    # Finite values only: NaN/Infinity cannot be serialized by GET /result.
+    category_scores: Dict[str, confloat(allow_inf_nan=False)] = Field(  # type: ignore
         default_factory=dict,
-        max_length=16,
         title="Category Scores",
         description="Per-category breakdown of the score; passed through to /result.",
     )
