@@ -1,6 +1,21 @@
 challenge:
   bot_timeout: 120
   session_timeout_score: 0.0
+  # Every submission is built once and run this many times; each run is a
+  # fresh session scored on its own, and the worst session decides.
+  runs_per_submission: 10
+  # Any session below this (automation detected, timeout, runner failure)
+  # rejects the whole submission with 0.0.
+  reject_below: 0.5
+  # Re-runs allowed per submission for a timed-out or crashed session.
+  session_retries: 1
+  # GET /result detail: minimal (score + coarse phase) or full (debug only).
+  feedback_detail: minimal
+  # Scorer that compares the sessions of one submission (set per deployment,
+  # BV_CHALLENGE_SCORER_ENDPOINT). Empty: no cross-run comparison.
+  # scorer_endpoint: "http://scorer:8000"
+  # shadow: log the comparison verdict only. enforce: let it reject.
+  runs_compare_mode: shadow
   # VM configuration for remote Docker build/run
   vm_endpoint: "http://bot-runner:8000"
   vm_timeout: 300

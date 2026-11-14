@@ -6,11 +6,7 @@ from fastapi.responses import JSONResponse
 from api.core.responses import BaseResponse
 from api.core.dependencies.auth import auth_api_key
 from api.endpoints.challenge import service
-from api.endpoints.challenge.schemas import (
-    MinerOutput,
-    PayloadRequest,
-    ScoreResponse,
-)
+from api.endpoints.challenge.schemas import MinerOutput, PayloadRequest
 from api.logger import logger
 
 router = APIRouter(tags=["Challenge"])
@@ -21,11 +17,11 @@ router = APIRouter(tags=["Challenge"])
     summary="Score",
     description="Build + run the miner bot inside DinD against the web page; wait for scorer callback; return final score.",
     response_class=JSONResponse,
-    response_model=ScoreResponse,
+    response_model=float,
     responses={400: {}, 422: {}},
     dependencies=[Depends(auth_api_key)],
 )
-def post_score(request: Request, miner_output: MinerOutput) -> ScoreResponse:
+def post_score(request: Request, miner_output: MinerOutput) -> float:
     _request_id = request.state.request_id
     logger.info(f"[{_request_id}] - Evaluating the miner output...")
     try:
@@ -44,7 +40,9 @@ def post_score(request: Request, miner_output: MinerOutput) -> ScoreResponse:
     logger.success(
         f"[{_request_id}] - Scored session {_response.session_id}: {_response.score}"
     )
-    return _response
+    # The validator reads the body as a bare number (as on main); anything
+    # else is recorded as 0.0.
+    return _response.score
 
 
 @router.get(
