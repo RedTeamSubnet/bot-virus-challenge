@@ -28,6 +28,7 @@ def _challenge(**over):
         feedback_detail="minimal",
         session_retries=0,
         runs_compare_min=3,
+        runs_compare_mode="enforce",
     )
     base.update(over)
     return SimpleNamespace(challenge=SimpleNamespace(**base))
@@ -393,3 +394,28 @@ def test_overlapping_submissions_are_refused(monkeypatch, runner) -> None:
     finally:
         service._score_lock.release()
     assert service.score(MINER).score == pytest.approx(0.95)
+
+
+# ---- shadow mode --------------------------------------------------------------
+
+
+def test_shadow_mode_compares_but_never_changes_the_score(
+    monkeypatch, runner, scorer
+) -> None:
+    _use(monkeypatch, scorer_endpoint="http://scorer:8000", runs_compare_mode="shadow")
+    runner["script"] = [0.93] * 8
+    scorer["verdict"] = {"level": "automation_supported", "score_cap": 0.45}
+    assert service.score(MINER).score == pytest.approx(0.93)
+    assert len(scorer["calls"]) == 1
+    assert service._full_result()["phase"] == "completed"
+
+
+def test_shadow_mode_ignores_a_failed_comparison(monkeypatch, runner, scorer) -> None:
+    _use(monkeypatch, scorer_endpoint="http://scorer:8000", runs_compare_mode="shadow")
+    runner["script"] = [0.93] * 8
+    scorer["exc"] = ValueError("scorer down")
+    assert service.score(MINER).score == pytest.approx(0.93)
+
+
+def test_shadow_is_the_default_mode() -> None:
+    assert config.challenge.runs_compare_mode == "shadow"

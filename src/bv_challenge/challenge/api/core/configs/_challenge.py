@@ -36,6 +36,11 @@ class ChallengeConfig(FrozenBaseConfig):
     scorer_timeout: int = Field(default=30, ge=1)
     scorer_ssl_verify: bool = Field(default=True)
     runs_compare_min: int = Field(default=3, ge=2, le=20)
+    # "shadow": the comparison runs and its verdict is logged, but it never
+    # changes a score and a failed comparison is only a warning. "enforce":
+    # the verdict rejects, and a failed comparison fails the request (503).
+    # Roll out in shadow first.
+    runs_compare_mode: Literal["shadow", "enforce"] = Field(default="shadow")
     vm_endpoint: str = Field(...)
     vm_timeout: int = Field(default=120, ge=1)
     vm_ssl_verify: bool = Field(default=True)

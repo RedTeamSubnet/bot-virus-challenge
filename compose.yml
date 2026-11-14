@@ -14,6 +14,8 @@ services:
       BV_CHALLENGE_API_KEY: ${BV_CHALLENGE_API_KEY:-dev-challenge-key-change-me}
       BV_CHALLENGE_VM_API_KEY: ${BV_CHALLENGE_VM_API_KEY:-dev-runner-key-change-me}
       BV_CHALLENGE_BOT_TIMEOUT: ${BV_CHALLENGE_BOT_TIMEOUT:-120}
+      BV_CHALLENGE_SCORER_ENDPOINT: ${BV_CHALLENGE_SCORER_ENDPOINT:-}
+      BV_CHALLENGE_RUNS_COMPARE_MODE: ${BV_CHALLENGE_RUNS_COMPARE_MODE:-shadow}
     env_file:
       - path: .env
         required: false

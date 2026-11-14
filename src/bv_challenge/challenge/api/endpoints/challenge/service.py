@@ -184,16 +184,23 @@ def _compare_sessions(
 ) -> Union[float, None]:
     """Cross-run cap from the scorer, or None when it finds no automation.
 
-    A comparison that cannot be made is an infrastructure failure: the request
+    In "shadow" mode the verdict is only logged. In "enforce" mode a
+    comparison that cannot be made is an infrastructure failure: the request
     fails with 503 and no score, so a scorer outage can neither pass a bot nor
     zero an honest submission.
     """
     cfg = config.challenge
     if not cfg.scorer_endpoint or len(outcomes) < cfg.runs_compare_min:
         return None
+    enforce = cfg.runs_compare_mode == "enforce"
     try:
         verdict = challenge_utils.compare_runs([o.session_id for o in outcomes])
     except Exception as err:
+        if not enforce:
+            logger.warning(
+                f"[{build_id}] run comparison failed (shadow, ignored): {err}"
+            )
+            return None
         logger.error(f"[{build_id}] run comparison failed: {err}")
         _set_latest_result(
             session_id=build_id,
@@ -206,10 +213,13 @@ def _compare_sessions(
             error_enum=ErrorCodeEnum.SERVICE_UNAVAILABLE,
             message="Run comparison is unavailable; the submission was not scored.",
         )
-    logger.info(
-        f"[{build_id}] run comparison: level={verdict['level']} cap={verdict.get('score_cap')}"
-    )
     cap = verdict.get("score_cap")
+    logger.info(
+        f"[{build_id}] run comparison ({cfg.runs_compare_mode}): level={verdict['level']} cap={cap} "
+        f"worst_session={min(o.score for o in outcomes):.3f}"
+    )
+    if not enforce:
+        return None
     return float(cap) if cap is not None else None
 
 
