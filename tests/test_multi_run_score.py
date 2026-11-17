@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+from pydantic import SecretStr
+
 import pytest
 
 from src.bv_challenge.challenge.api.main import app  # noqa: F401  (loads config)
@@ -28,6 +30,7 @@ def _challenge(**over):
         session_retries=0,
         runs_compare_min=3,
         runs_compare_mode="enforce",
+        session_token_secret=None,
     )
     base.update(over)
     return SimpleNamespace(challenge=SimpleNamespace(**base))
@@ -44,8 +47,9 @@ def runner(monkeypatch):
             raise ValueError("build failed")
         return {"status": "success"}
 
-    def run_web(session_id, keep_image=False):
+    def run_web(session_id, keep_image=False, page_query=None):
         state["runs"].append(keep_image)
+        state.setdefault("page_queries", []).append((session_id, page_query or {}))
         step = state["script"][len(state["runs"]) - 1]
         if step == "runner_error":
             raise ValueError("bot container exited with status 1")
@@ -407,3 +411,31 @@ def test_shadow_mode_ignores_a_failed_comparison(monkeypatch, runner, scorer) ->
 
 def test_shadow_is_the_default_mode() -> None:
     assert config.challenge.runs_compare_mode == "shadow"
+
+
+# --- session token on the page URL ------------------------------------------
+
+
+def test_no_token_is_issued_without_a_secret(monkeypatch, runner) -> None:
+    _use(monkeypatch, runs_per_submission=1)
+    runner["script"] = [0.9]
+    service.score(MINER)
+    assert [_q for _sid, _q in runner["page_queries"]] == [{}]
+
+
+def test_a_per_session_token_is_issued_when_a_secret_is_set(monkeypatch, runner) -> None:
+    from api.core.utils.session_token import issue_session_token
+
+    _secret = "x" * 40
+    _use(monkeypatch, runs_per_submission=2, session_token_secret=SecretStr(_secret))
+    runner["script"] = [0.9, 0.9]
+    service.score(MINER)
+    _pairs = runner["page_queries"]
+    assert len(_pairs) == 2
+    _tokens = set()
+    for _sid, _q in _pairs:
+        assert set(_q) == {"token", "issued_at"}
+        # A valid HMAC for THIS run's session id and issued_at.
+        assert _q["token"] == issue_session_token(_sid, _secret, int(_q["issued_at"]))
+        _tokens.add(_q["token"])
+    assert len(_tokens) == 2  # distinct per session
