@@ -45,6 +45,11 @@ class ChallengeConfig(FrozenBaseConfig):
     # min_length=9: bot-runner's auth_api_key rejects len <= 8.
     vm_api_key: SecretStr = Field(..., min_length=9, max_length=128)
     api_key: SecretStr = Field(..., min_length=8, max_length=128)
+    # Shared with the scorer ONLY (RTS_SCORING_SESSION_TOKEN_SECRET). When set,
+    # the challenge issues a per-session HMAC token on the page URL so the
+    # scorer can tell a real page load from a crafted submission. Never sent to
+    # the browser except as the derived token. Unset: no token is issued.
+    session_token_secret: Optional[SecretStr] = Field(default=None, min_length=32, max_length=256)
 
     model_config = SettingsConfigDict(env_prefix=f"{ENV_PREFIX}CHALLENGE_")
 

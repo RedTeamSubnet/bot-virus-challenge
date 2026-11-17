@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -45,13 +45,21 @@ def send_build_request(bot_py: str, dockerfile: str, session_id: str) -> Dict[st
     )
 
 
-def send_run_web_request(session_id: str, keep_image: bool = False) -> Dict[str, Any]:
+def send_run_web_request(
+    session_id: str,
+    keep_image: bool = False,
+    page_query: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     # keep_image: the runner keeps the built miner image for the next run of
     # the same submission (runner >= keep_image support; older runners ignore
     # the field and rebuild nothing, so the next run fails loudly as "run").
-    return _post_vm_request(
-        "/run-web", {"session_id": session_id, "keep_image": keep_image}
-    )
+    # page_query: extra query params for the page URL (e.g. the session token);
+    # older runners ignore the field, so no token reaches the page until the
+    # runner is updated, and the scorer only enforces tokens in enforce mode.
+    _body: Dict[str, Any] = {"session_id": session_id, "keep_image": keep_image}
+    if page_query:
+        _body["page_query"] = page_query
+    return _post_vm_request("/run-web", _body)
 
 
 def compare_runs(session_ids: List[str]) -> Dict[str, Any]:

@@ -10,6 +10,7 @@ from pydantic import validate_call
 from api.config import config
 from api.core.constants import ErrorCodeEnum
 from api.core.exceptions import BaseHTTPException
+from api.core.utils.session_token import issue_now
 from api.endpoints.challenge import utils as challenge_utils
 from api.endpoints.challenge.schemas import (
     MinerOutput,
@@ -133,12 +134,23 @@ class _SessionOutcome:
         return {"session_id": self.session_id, "score": self.score, "phase": self.phase}
 
 
+def _page_query(session_id: str) -> Dict[str, str]:
+    """A session token for the page URL when a scorer secret is configured."""
+    _secret = config.challenge.session_token_secret
+    if _secret is None:
+        return {}
+    _token, _issued_at = issue_now(session_id, _secret.get_secret_value())
+    return {"token": _token, "issued_at": str(_issued_at)}
+
+
 def _run_session(session_id: str, keep_image: bool) -> _SessionOutcome:
     """Run the already-built bot once and wait for the scorer's callback."""
     pending = _register_session(session_id)
     try:
         try:
-            challenge_utils.send_run_web_request(session_id, keep_image=keep_image)
+            challenge_utils.send_run_web_request(
+                session_id, keep_image=keep_image, page_query=_page_query(session_id)
+            )
         except Exception as err:
             logger.error(f"[{session_id}] runner failed: {err}")
             return _SessionOutcome(
