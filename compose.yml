@@ -10,9 +10,9 @@ services:
       TERM: ${TERM:-xterm}
       TZ: ${TZ:-Asia/Seoul}
       BV_CHALLENGE_API_PORT: ${BV_CHALLENGE_API_PORT:-10001}
-      BV_CHALLENGE_VM_ENDPOINT: ${BV_CHALLENGE_VM_ENDPOINT:-http://bot-runner-vm:8000}
       BV_CHALLENGE_API_KEY: ${BV_CHALLENGE_API_KEY:-dev-challenge-key-change-me}
-      BV_CHALLENGE_VM_API_KEY: ${BV_CHALLENGE_VM_API_KEY:-dev-runner-key-change-me}
+      BV_BOT_RUNNER_ENDPOINT: ${BV_BOT_RUNNER_ENDPOINT:-http://bot-runner-vm:8000}
+      BV_BOT_RUNNER_KEY: ${BV_BOT_RUNNER_KEY:-dev-bot-runner-key-change-me}
       BV_CHALLENGE_BOT_TIMEOUT: ${BV_CHALLENGE_BOT_TIMEOUT:-120}
     env_file:
       - path: .env
