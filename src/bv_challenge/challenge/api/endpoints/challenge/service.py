@@ -27,10 +27,8 @@ class _PendingSession:
     feedback: Union[str, None] = None
 
 
-_pending_lock = threading.Lock()
 _pending_sessions: Dict[str, _PendingSession] = {}
 
-_latest_result_lock = threading.Lock()
 LatestResultValue = Union[float, str, None, Dict[str, float]]
 _latest_result: Dict[str, LatestResultValue] = {
     "session_id": None,
@@ -49,33 +47,29 @@ def _set_latest_result(
     phase: str,
     category_scores: Union[Dict[str, float], None] = None,
 ) -> None:
-    with _latest_result_lock:
-        _latest_result.update(
-            {
-                "session_id": session_id,
-                "score": score,
-                "feedback": feedback,
-                "phase": phase,
-                "category_scores": dict(category_scores or {}),
-            }
-        )
+    _latest_result.update(
+        {
+            "session_id": session_id,
+            "score": score,
+            "feedback": feedback,
+            "phase": phase,
+            "category_scores": dict(category_scores or {}),
+        }
+    )
 
 
 def get_result() -> Dict[str, LatestResultValue]:
-    with _latest_result_lock:
-        return dict(_latest_result)
+    return dict(_latest_result)
 
 
 def _register_session(session_id: str) -> _PendingSession:
     pending = _PendingSession(event=threading.Event())
-    with _pending_lock:
-        _pending_sessions[session_id] = pending
+    _pending_sessions[session_id] = pending
     return pending
 
 
 def _unregister_session(session_id: str) -> None:
-    with _pending_lock:
-        _pending_sessions.pop(session_id, None)
+    _pending_sessions.pop(session_id, None)
 
 
 @validate_call
@@ -118,6 +112,14 @@ def score(miner_output: MinerOutput) -> ScoreResponse:
             phase = "completed"
             category_scores = pending.category_scores
             logger.info(f"[{session_id}] scorer returned {final_score}")
+        elif signaled and pending.score is None:
+            final_score = 0.0
+            feedback = pending.feedback or "scorer returned no score"
+            phase = "error"
+            category_scores = {}
+            logger.error(
+                f"[{session_id}] scorer returned no score but signaled completion"
+            )
         else:
             final_score = float(config.challenge.session_timeout_score)
             feedback = "scorer timed out"
@@ -141,9 +143,11 @@ def score(miner_output: MinerOutput) -> ScoreResponse:
 
 @validate_call
 def record_payload(payload: PayloadRequest) -> None:
-    with _pending_lock:
-        pending = _pending_sessions.get(payload.session_id)
+    pending = _pending_sessions.get(payload.session_id)
     if pending is None:
+        logger.error(
+            f"[{payload.session_id}] scorer POSTed score but session not found"
+        )
         raise BaseHTTPException(
             error_enum=ErrorCodeEnum.NOT_FOUND,
             message="Unknown or expired session_id",
