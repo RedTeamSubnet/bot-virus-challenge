@@ -14,6 +14,7 @@ from ._base import FrozenBaseConfig
 from ._dev import DevConfig, FrozenDevConfig
 from ._api import ApiConfig, FrozenApiConfig
 from ._challenge import ChallengeConfig
+from ._bot_runner import BotRunnerConfig
 
 
 # Main config schema:
@@ -25,6 +26,7 @@ class MainConfig(FrozenBaseConfig):
     )
     api: ApiConfig = Field(...)
     challenge: ChallengeConfig = Field(...)
+    bot_runner: BotRunnerConfig = Field(...)
     logger: LoggerConfigPM = Field(default_factory=LoggerConfigPM)
 
     @field_validator("env")

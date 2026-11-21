@@ -9,16 +9,16 @@ from api.logger import logger
 
 
 def _post_vm_request(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    bot_runner_endpoint = str(config.challenge.bot_runner_endpoint).rstrip("/")
-    timeout = config.challenge.bot_runner_timeout
+    bot_runner_endpoint = str(config.bot_runner.endpoint).rstrip("/")
+    timeout = config.bot_runner.timeout
     logger.info(f"Sending bot-runner request to {bot_runner_endpoint}{path}")
     try:
         response = requests.post(
             f"{bot_runner_endpoint}{path}",
             json=payload,
             timeout=timeout,
-            verify=config.challenge.bot_runner_ssl_verify,
-            headers={"X-API-Key": config.challenge.bot_runner_key.get_secret_value()},
+            verify=config.bot_runner.ssl_verify,
+            headers={"X-API-Key": config.bot_runner.key.get_secret_value()},
         )
         if response.status_code != 200:
             raise ValueError(

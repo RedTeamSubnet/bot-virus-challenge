@@ -10,10 +10,6 @@ from ._base import FrozenBaseConfig
 class ChallengeConfig(FrozenBaseConfig):
     bot_timeout: int = Field(default=120, ge=1)
     session_timeout_score: float = Field(default=0.0, ge=0.0, le=1.0)
-    bot_runner_endpoint: str = Field(...)
-    bot_runner_timeout: int = Field(default=120, ge=1)
-    bot_runner_ssl_verify: bool = Field(default=True)
-    bot_runner_key: SecretStr = Field(..., min_length=9, max_length=128)
     api_key: SecretStr = Field(..., min_length=8, max_length=128)
 
     model_config = SettingsConfigDict(env_prefix=f"{ENV_PREFIX}CHALLENGE_")
