@@ -11,10 +11,10 @@ The default Compose stack starts three services:
 | Component | Role |
 | --- | --- |
 | `challenge-api` | Public challenge API: supplies tasks, accepts miner outputs, coordinates evaluation, and returns results. |
-| `bot-runner` | Container Runner: builds and executes submitted miner containers for the challenge API. |
-| `bot-runner-dind` | Docker-in-Docker daemon used by the Container Runner. |
+| `bot-runner` | Bot Runner: builds and executes submitted miner containers for the challenge API. |
+| `bot-runner-dind` | Docker-in-Docker daemon used by the Bot Runner. |
 
-The challenge API calls the Container Runner internally at `BV_CHALLENGE_API_BOT_RUNNER_URL` (default: `http://bot-runner:8000`). See the [Container Runner README](src/modules/bv-bot-runner/README.md) for its operational contract.
+The Bot Runner is an internal service. Its implementation is not part of this public repository; miners only need the submission contract described below and in the [miner commit example](examples/miner_commit/README.md).
 
 ## Quick start
 
@@ -62,20 +62,15 @@ Copy `.env.example` before changing values. Keep secrets and deployment-specific
 | --- | --- | --- |
 | `BV_CHALLENGE_API_PORT` | `10001` | Public challenge API port. |
 | `BV_CHALLENGE_API_KEY` | required | API key required by `POST /score`; use 9–128 alphanumeric or hyphen characters. |
-| `BV_CHALLENGE_API_BOT_RUNNER_URL` | `http://bot-runner:8000` | Container Runner URL as seen by `challenge-api`. |
-| `BV_CHALLENGE_API_BOT_RUNNER_SESSION_COUNT` | `2` | Number of web-session checks requested from the runner. |
-| `BV_CHALLENGE_API_BOT_RUNNER_REQUEST_TIMEOUT_SEC` | `900` | Controller-to-runner request timeout. |
-| `MDM_CHALLENGE_BASE_URL` | `http://challenge-api:10001` | Challenge API base URL as seen by the runner. |
-| `VM_RUNNER_API_PORT` | `8000` | Container Runner port. |
-
-For host-local development, use `http://localhost:10001` where a runner process cannot resolve the Compose service name. For the full Compose stack, retain the service-name defaults.
 
 ## Miner evaluation workflow
 
 1. A miner retrieves the task from `GET /task`.
 2. The miner produces the required output and sends it to `POST /score` together with the corresponding task input and an API key.
-3. The challenge API asks the Container Runner to build the supplied bot/Dockerfile, run the simple-bot gate when enabled, then run configured challenge-web sessions when enabled.
+3. The evaluation service builds the submitted bot image, runs the simple-bot gate when enabled, then runs the challenge web sessions when enabled.
 4. The miner or operator reads the latest feedback from `GET /result`.
+
+Submission requirements (file layout, Ruff compliance, bot page actions, and allowed Dockerfile sources) are listed in the [miner commit example](examples/miner_commit/README.md#-submission-requirements).
 
 Use Swagger for exact request and response schemas; they are versioned with the running API. Basic discovery calls:
 
@@ -101,10 +96,9 @@ The API returns `401` for a missing or invalid key. Keys must be 9–128 charact
 
 ## Operations and troubleshooting
 
-- A failed build, simple-bot gate, web session, or runner request is reflected in the score according to the challenge configuration. Inspect `challenge-api` and `bot-runner` logs together when diagnosing it.
-- The runner needs access to the shared commit directory, its Docker socket, and the configured Docker networks. A missing mount/network commonly appears as a build or run failure.
-- The runner API can build and run untrusted containers. Keep it on a controlled network when possible. If exposed outside that network, place it behind appropriate network controls and an authentication gateway.
-- Validate configuration before rollout with `./compose.sh validate`; check service readiness with `/health` and inspect logs via `./compose.sh logs -f`.
+- A failed build, simple-bot gate, or web session is reflected in the score according to the challenge configuration. Check the service logs (`./compose.sh logs -f`) when diagnosing it.
+- Validate configuration before rollout with `./compose.sh validate`, and check service readiness with `/health`.
+- Miner submissions are untrusted code. Run the stack on a controlled host and keep the score API key out of version control.
 
 ## Development and references
 
@@ -113,8 +107,6 @@ pip install -e .[dev]
 pre-commit install
 ```
 
-- [Container Runner operations](src/modules/bv-bot-runner/README.md)
-- [Container Runner tests](src/modules/bv-bot-runner/docs/TESTING.md)
-- [Miner commit example](examples/miner_commit/README.md)
+- [Miner commit example and submission requirements](examples/miner_commit/README.md)
 - [Score submission skill](skills/bv-score-submission/SKILL.md)
 - [Release notes](docs/release-notes.md)

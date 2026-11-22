@@ -59,16 +59,68 @@ Check with web browser:
 
 ---
 
-## 🔍 Validate Your Submission
+## 📋 Submission Requirements
 
-Before submitting, check `src/commit/bot.py` against the provided `.ruff.toml`:
+Your submission is evaluated only if it meets all of the following requirements.
+
+### 1. 🐍 `bot.py` must pass Ruff
+
+`src/commit/bot.py` must pass Ruff with the provided `.ruff.toml` and report no findings:
 
 ```sh
 ruff check --config .ruff.toml src/commit/bot.py
 ```
 
-Also send a `GET /solve` request before submission to verify that your
-submission is valid and stays within the provided limits.
+Also check the line limits enforced by `/solve`:
+
+- `bot.py`: at most **2000** lines
+- Any other submitted file: at most **500** lines
+
+### 2. 🤖 The bot must perform the required page actions
+
+The bot runs against the challenge web page and must, in order:
+
+1. Click the three corner buttons: `click-here-1`, `click-here-2`, and `click-here-3`.
+2. Type into the username and password fields:
+    - `username` (`<input type="text">`): at least **16** characters
+    - `password` (`<input type="password">`): at least **16** characters
+3. Click the `submit` button.
+
+Elements are identified by their `id`. Use these ids exactly as written.
+
+### 3. 🐳 `src/commit/Dockerfile` must use only allowed sources
+
+Only `src/commit/Dockerfile` is checked. It is one of the files `/solve` returns, and it is the Dockerfile the platform builds. Any other Dockerfile in the repository is ignored.
+
+Your `src/commit/Dockerfile` must fetch content only from the locations below. The build network is restricted: a download from any other location fails.
+
+| Category | Allowed provider |
+| --- | --- |
+| Base image (`FROM`) | Docker container registry (see note below) |
+| Debian packages (`apt-get`) | Debian package repositories |
+| Ubuntu packages (`apt-get`) | Ubuntu package repositories |
+| Alpine packages (`apk`) | Alpine Linux package CDN |
+| Python packages (`pip`) | PyPI and Python Package Index file host |
+| JavaScript packages (`npm`, `yarn`) | npm registry and Yarn registry |
+| Java packages (Maven) | Maven Central |
+| Go modules (`go`) | Go module proxy and Go checksum database |
+| Rust crates (`cargo`) | crates.io |
+
+Note: the build network does not proxy container registries. `FROM` images are pulled by the host Docker daemon before the build, so only base images that the challenge operator has made available can be used.
+
+### 4. 🔍 Validate before submission
+
+Before submitting:
+
+```sh
+# Lint check (requirement 1):
+ruff check --config .ruff.toml src/commit/bot.py
+
+# Send a GET /solve request to confirm your submission is valid and within the line limits:
+curl -s http://localhost:10002/solve | jq
+```
+
+---
 
 ## 🏗️ Build Docker Image
 
