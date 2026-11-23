@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0f1115" />
+    <title>BotVirus Login · Practice</title>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; }
+
+      html, body { height: 100%; margin: 0; }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+        background: #0f1115;
+        color: #e6e8ee;
+      }
+
+      /* ------- layout ------- */
+      .page {
+        position: relative;
+        min-height: 100%;
+        background:
+          radial-gradient(1200px 600px at 20% -10%, rgba(79, 124, 255, 0.18), transparent 60%),
+          radial-gradient(900px 500px at 110% 110%, rgba(170, 102, 255, 0.14), transparent 55%),
+          #0f1115;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 80px 24px;
+      }
+
+      .shell {
+        width: 100%;
+        max-width: 520px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
+        padding: 36px 32px;
+        backdrop-filter: blur(18px);
+        box-shadow:
+          0 20px 60px rgba(0, 0, 0, 0.55),
+          inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+
+      /* ------- 3 corner buttons ------- */
+      .corner {
+        position: fixed;
+        z-index: 10;
+        padding: 10px 18px;
+        font: 500 13px/1 "SF Mono", ui-monospace, Menlo, monospace;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #cbd3e1;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 120ms ease, transform 120ms ease, border-color 120ms ease;
+      }
+      .corner:hover {
+        background: rgba(79, 124, 255, 0.18);
+        border-color: rgba(79, 124, 255, 0.5);
+        transform: translateY(-1px);
+      }
+      .corner:active { transform: translateY(0); }
+      .corner.clicked {
+        background: rgba(80, 200, 120, 0.18);
+        border-color: rgba(80, 200, 120, 0.55);
+        color: #a9f0c3;
+      }
+      .corner.clicked:hover {
+        background: rgba(80, 200, 120, 0.25);
+        border-color: rgba(80, 200, 120, 0.7);
+      }
+      #click-here-1 { top: 24px; left: 24px; }
+      #click-here-2 { top: 24px; right: 24px; }
+      #click-here-3 { bottom: 24px; left: 24px; }
+
+      /* ------- brand header ------- */
+      .brand { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+      .logo {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #4f7cff, #aa66ff);
+        display: grid;
+        place-items: center;
+        font: 700 18px/1 "SF Mono", monospace;
+        color: white;
+        box-shadow: 0 8px 24px rgba(79, 124, 255, 0.4);
+      }
+      h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+      .subtitle { margin: 4px 0 0; font-size: 13px; color: #8e97aa; max-width: 340px; }
+
+      /* ------- info block ------- */
+      .info {
+        margin: 0 0 24px;
+        padding: 16px 18px;
+        background: rgba(255, 255, 255, 0.025);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 12px;
+      }
+      .info h2 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #8e97aa;
+      }
+      .info ol { margin: 0; padding-left: 20px; font-size: 13.5px; color: #c6ccda; line-height: 1.6; }
+      .info strong { color: #e6e8ee; }
+
+      /* ------- form ------- */
+      .login { display: flex; flex-direction: column; gap: 14px; }
+      .field { display: flex; flex-direction: column; gap: 6px; }
+      .field span {
+        font-size: 12px;
+        color: #8e97aa;
+        font-weight: 500;
+        letter-spacing: 0.03em;
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+      }
+      .counter {
+        font: 500 11px/1 "SF Mono", ui-monospace, Menlo, monospace;
+        color: #6b7488;
+        letter-spacing: 0;
+      }
+      .counter.ok { color: #7cd9a3; }
+      .field input {
+        padding: 12px 14px;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        color: #e6e8ee;
+        font-size: 14px;
+        font-family: inherit;
+        outline: none;
+        transition: border-color 120ms ease, background 120ms ease;
+      }
+      .field input:focus { border-color: #4f7cff; background: rgba(0, 0, 0, 0.45); }
+
+      .submit {
+        margin-top: 8px;
+        padding: 13px 16px;
+        background: linear-gradient(135deg, #4f7cff, #6a66ff);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-size: 14.5px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        cursor: pointer;
+        box-shadow: 0 8px 24px rgba(79, 124, 255, 0.35);
+        transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+      }
+      .submit:hover { transform: translateY(-1px); filter: brightness(1.05); }
+      .submit:active { transform: translateY(0); }
+      .submit:disabled {
+        cursor: not-allowed;
+        background: rgba(255, 255, 255, 0.06);
+        color: #6b7488;
+        box-shadow: none;
+        transform: none;
+        filter: none;
+      }
+
+      .hint {
+        margin: 10px 0 0;
+        font: 500 12px/1.5 "SF Mono", ui-monospace, Menlo, monospace;
+        color: #8e97aa;
+      }
+
+      /* ------- check result ------- */
+      .result {
+        margin-top: 22px;
+        padding: 16px 18px;
+        background: rgba(255, 255, 255, 0.025);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 12px;
+        display: none;
+      }
+      .result.show { display: block; }
+      .result h2 {
+        margin: 0 0 10px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #8e97aa;
+      }
+      .result ul { list-style: none; margin: 0; padding: 0; }
+      .result li {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 6px 0;
+        font-size: 13.5px;
+        color: #c6ccda;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      }
+      .result li:last-child { border-bottom: none; }
+      .result .mark { font: 600 12px/1 "SF Mono", monospace; }
+      .result .mark.ok { color: #7cd9a3; }
+      .result .mark.no { color: #ff9a9a; }
+      .verdict {
+        margin: 12px 0 0;
+        font: 600 14px/1.4 "SF Mono", ui-monospace, Menlo, monospace;
+      }
+      .verdict.pass { color: #a9f0c3; }
+      .verdict.fail { color: #ffb3b3; }
+
+      .foot {
+        margin-top: 22px;
+        font: 400 11px/1.4 "SF Mono", ui-monospace, Menlo, monospace;
+        color: #596173;
+      }
+
+      @media (max-width: 480px) {
+        .corner { padding: 8px 12px; font-size: 11px; }
+        .shell { padding: 28px 22px; border-radius: 16px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <button id="click-here-1" class="corner" type="button" aria-label="click here 1">click here</button>
+      <button id="click-here-2" class="corner" type="button" aria-label="click here 2">click here</button>
+      <button id="click-here-3" class="corner" type="button" aria-label="click here 3">click here</button>
+
+      <main class="shell">
+        <header class="brand">
+          <div class="logo">BV</div>
+          <div>
+            <h1>BotVirus Login</h1>
+            <p class="subtitle">Practice page. Run your bot here and check that it meets every requirement. Nothing leaves this page.</p>
+          </div>
+        </header>
+
+        <section class="info">
+          <h2>How it works</h2>
+          <ol>
+            <li>Click all three <strong>click here</strong> buttons in the corners (in order, before typing).</li>
+            <li>Enter a username and password, each at least <strong>16 characters</strong>.</li>
+            <li>Click <strong>Submit</strong>. The page checks the run and shows the result below.</li>
+          </ol>
+        </section>
+
+        <form class="login" id="form">
+          <label class="field">
+            <span>
+              Username
+              <small class="counter" id="username-count" aria-live="polite">0/16</small>
+            </span>
+            <input id="username" name="username" type="text" autocomplete="username" placeholder="at least 16 characters" />
+          </label>
+
+          <label class="field">
+            <span>
+              Password
+              <small class="counter" id="password-count" aria-live="polite">0/16</small>
+            </span>
+            <input id="password" name="password" type="password" autocomplete="current-password" placeholder="at least 16 characters" />
+          </label>
+
+          <button id="submit" type="submit" class="submit">Submit</button>
+
+          <p class="hint" id="hint"></p>
+        </form>
+
+        <section class="result" id="check-result" data-status="pending" aria-live="polite">
+          <h2>Check result</h2>
+          <ul>
+            <li id="check-corners"><span>Clicked click-here-1, -2, -3</span><span class="mark"></span></li>
+            <li id="check-order"><span>Corners clicked before typing</span><span class="mark"></span></li>
+            <li id="check-username"><span>Username ≥ 16 characters</span><span class="mark"></span></li>
+            <li id="check-password"><span>Password ≥ 16 characters</span><span class="mark"></span></li>
+            <li id="check-submit"><span>Submit pressed with valid input</span><span class="mark"></span></li>
+          </ul>
+          <p class="verdict" id="verdict"></p>
+        </section>
+
+        <footer class="foot">practice · local only</footer>
+      </main>
+    </div>
+
+    <script>
+      "use strict";
+
+      const MIN_LEN = 16;
+      const CORNERS = [1, 2, 3];
+
+      const $ = (id) => document.getElementById(id);
+      const username = $("username");
+      const password = $("password");
+      const submitBtn = $("submit");
+
+      // Run state. Only what the requirements need; nothing is sent anywhere.
+      const state = {
+        clicked: { 1: false, 2: false, 3: false },
+        allClickedAt: null, // timestamp of the third distinct corner click
+        firstTypingAt: null, // timestamp of the first keystroke in either field
+        submitted: false,
+      };
+
+      const allClicked = () => CORNERS.every((n) => state.clicked[n]);
+      const usernameOk = () => username.value.length >= MIN_LEN;
+      const passwordOk = () => password.value.length >= MIN_LEN;
+
+      function orderOk() {
+        // Passes if no typing happened, or all corners were clicked before the first keystroke.
+        if (state.firstTypingAt === null) return allClicked();
+        return state.allClickedAt !== null && state.allClickedAt <= state.firstTypingAt;
+      }
+
+      function missing() {
+        const out = [];
+        if (!allClicked()) {
+          const left = CORNERS.filter((n) => !state.clicked[n]).map((n) => `#${n}`);
+          out.push(`click ${left.join(", ")}`);
+        }
+        if (!usernameOk()) out.push(`username ≥ ${MIN_LEN} chars`);
+        if (!passwordOk()) out.push(`password ≥ ${MIN_LEN} chars`);
+        return out;
+      }
+
+      function refresh() {
+        const u = username.value.length;
+        const p = password.value.length;
+        $("username-count").textContent = `${u}/${MIN_LEN}`;
+        $("username-count").classList.toggle("ok", usernameOk());
+        $("password-count").textContent = `${p}/${MIN_LEN}`;
+        $("password-count").classList.toggle("ok", passwordOk());
+
+        const m = missing();
+        $("hint").textContent = m.length ? `Needs: ${m.join(" · ")}` : "";
+      }
+
+      function markClick(n) {
+        const btn = $(`click-here-${n}`);
+        if (!state.clicked[n]) {
+          state.clicked[n] = true;
+          btn.classList.add("clicked");
+          btn.textContent = "✓ clicked";
+          if (allClicked() && state.allClickedAt === null) state.allClickedAt = Date.now();
+        }
+        refresh();
+      }
+
+      CORNERS.forEach((n) => $(`click-here-${n}`).addEventListener("click", () => markClick(n)));
+
+      function onTyping() {
+        if (state.firstTypingAt === null) state.firstTypingAt = Date.now();
+        refresh();
+      }
+      username.addEventListener("input", onTyping);
+      password.addEventListener("input", onTyping);
+
+      function setMark(id, ok) {
+        const li = $(id);
+        const mark = li.querySelector(".mark");
+        mark.textContent = ok ? "PASS" : "FAIL";
+        mark.className = `mark ${ok ? "ok" : "no"}`;
+      }
+
+      function runChecks() {
+        const checks = {
+          corners: allClicked(),
+          order: orderOk(),
+          username: usernameOk(),
+          password: passwordOk(),
+          submit: allClicked() && usernameOk() && passwordOk(),
+        };
+        setMark("check-corners", checks.corners);
+        setMark("check-order", checks.order);
+        setMark("check-username", checks.username);
+        setMark("check-password", checks.password);
+        setMark("check-submit", checks.submit);
+
+        const pass = Object.values(checks).every(Boolean);
+        const panel = $("check-result");
+        panel.classList.add("show");
+        panel.dataset.status = pass ? "pass" : "fail";
+        const verdict = $("verdict");
+        verdict.className = `verdict ${pass ? "pass" : "fail"}`;
+        verdict.textContent = pass
+          ? "PASS: all requirements met."
+          : "FAIL: one or more requirements not met. See the list above.";
+        return pass;
+      }
+
+      $("form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        state.submitted = true;
+        runChecks();
+      });
+    </script>
+  </body>
+</html>

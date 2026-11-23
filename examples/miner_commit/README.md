@@ -46,8 +46,8 @@ uvicorn app:app --host="0.0.0.0" --port=10002 --no-access-log --no-server-header
 Check with CLI (curl):
 
 ```sh
-# Send a ping request with 'curl' to API server:
-curl -s http://localhost:10002/ping
+# Send a health request with 'curl' to API server:
+curl -s http://localhost:10002/health
 ```
 
 Check with web browser:
@@ -88,6 +88,10 @@ The bot runs against the challenge web page and must, in order:
 
 Elements are identified by their `id`. Use these ids exactly as written.
 
+To rehearse these steps locally, open the [practice page](practice/README.md). It has the same layout and ids as the challenge page and shows a PASS/FAIL result for each requirement after you press Submit:
+
+![Practice page check result](../../docs/images/web-page.png)
+
 ### 3. 🐳 `src/commit/Dockerfile` must use only allowed sources
 
 Only `src/commit/Dockerfile` is checked. It is one of the files `/solve` returns, and it is the Dockerfile the platform builds. Any other Dockerfile in the repository is ignored.
@@ -116,8 +120,8 @@ Before submitting:
 # Lint check (requirement 1):
 ruff check --config .ruff.toml src/commit/bot.py
 
-# Send a GET /solve request to confirm your submission is valid and within the line limits:
-curl -s http://localhost:10002/solve | jq
+# Send a POST /solve request to confirm your submission is valid and within the line limits:
+curl -s -X POST http://localhost:10002/solve -H "Content-Type: application/json" -d '{}' | jq
 ```
 
 ---
