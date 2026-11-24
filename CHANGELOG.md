@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.0.0 (2026-11-24)
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+
+
+**Full Changelog**: https://github.com/RedTeamSubnet/bot-virus-challenge/compare/v1.0.4...v2.0.0
+
 ## v1.0.4 (2026-08-26)
 
 <!-- Release notes generated using configuration in .github/release.yml at main -->
