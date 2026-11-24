@@ -21,15 +21,14 @@ router = APIRouter(tags=["Challenge"])
     summary="Score",
     description="Build + run the miner bot inside DinD against the web page; wait for scorer callback; return final score.",
     response_class=JSONResponse,
-    response_model=ScoreResponse,
     responses={400: {}, 422: {}},
     dependencies=[Depends(auth_api_key)],
 )
-def post_score(request: Request, miner_output: MinerOutput) -> ScoreResponse:
+def post_score(request: Request, miner_output: MinerOutput) -> float:
     _request_id = request.state.request_id
     logger.info(f"[{_request_id}] - Evaluating the miner output...")
     try:
-        _response = service.score(miner_output=miner_output)
+        score = service.score(miner_output=miner_output)
     except HTTPException:
         logger.error(f"[{_request_id}] - Failed to evaluate the miner output!")
         raise
@@ -41,10 +40,8 @@ def post_score(request: Request, miner_output: MinerOutput) -> ScoreResponse:
             status_code=500, detail="Failed to evaluate the miner output."
         )
 
-    logger.success(
-        f"[{_request_id}] - Scored session {_response.session_id}: {_response.score}"
-    )
-    return _response
+    logger.success(f"[{_request_id}] - Score: {score}")
+    return score
 
 
 @router.get(

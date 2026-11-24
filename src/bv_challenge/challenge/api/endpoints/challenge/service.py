@@ -11,11 +11,7 @@ from api.config import config
 from api.core.constants import ErrorCodeEnum
 from api.core.exceptions import BaseHTTPException
 from api.endpoints.challenge import utils as challenge_utils
-from api.endpoints.challenge.schemas import (
-    MinerOutput,
-    PayloadRequest,
-    ScoreResponse,
-)
+from api.endpoints.challenge.schemas import MinerOutput, PayloadRequest
 from api.logger import logger
 
 
@@ -73,7 +69,7 @@ def _unregister_session(session_id: str) -> None:
 
 
 @validate_call
-def score(miner_output: MinerOutput) -> ScoreResponse:
+def score(miner_output: MinerOutput) -> float:
     session_id = uuid.uuid4().hex
     logger.info(f"[{session_id}] starting score run")
     pending = _register_session(session_id)
@@ -91,7 +87,7 @@ def score(miner_output: MinerOutput) -> ScoreResponse:
                 feedback="failed to build miner container",
                 phase="build",
             )
-            return ScoreResponse(session_id=session_id, score=0.0)
+            return 0.0
 
         try:
             challenge_utils.send_run_web_request(session_id)
@@ -103,7 +99,7 @@ def score(miner_output: MinerOutput) -> ScoreResponse:
                 feedback="failed to run miner container",
                 phase="run",
             )
-            return ScoreResponse(session_id=session_id, score=0.0)
+            return 0.0
 
         signaled = pending.event.wait(timeout=config.challenge.bot_timeout)
         if signaled and pending.score is not None:
@@ -136,7 +132,7 @@ def score(miner_output: MinerOutput) -> ScoreResponse:
             phase=phase,
             category_scores=category_scores,
         )
-        return ScoreResponse(session_id=session_id, score=final_score)
+        return final_score
     finally:
         _unregister_session(session_id)
 
@@ -156,9 +152,7 @@ def record_payload(payload: PayloadRequest) -> None:
     pending.category_scores = dict(payload.category_scores)
     pending.feedback = payload.feedback
     pending.event.set()
-    logger.info(
-        f"[{payload.session_id}] scorer POSTed score={payload.score}"
-    )
+    logger.info(f"[{payload.session_id}] scorer POSTed score={payload.score}")
 
 
 __all__ = ["score", "record_payload", "get_result"]
