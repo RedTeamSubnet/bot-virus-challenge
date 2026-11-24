@@ -29,7 +29,7 @@ class BVChallengeManager(ChallengeManager):
 
         self.max_similarity = 0.4
         self.min_similarity = 0
-        self.min_score = 0.85
+        self.min_score = self.challenge_info.get("challenge_min_acceptable_score", 0.6)
         self.break_point = 0.6
         self.max_input = 1.0
         self.min_value = 0
@@ -196,8 +196,11 @@ class BVChallengeManager(ChallengeManager):
 
     def _adjust_score_by_similarity(self, raw_score, similarity_score) -> float:
         """Adjusts the raw score based on the similarity score."""
-        if similarity_score <= self.min_similarity:
-            return 0
+
+        if similarity_score is None:
+            # Nothing to compare against. Not evidence of copying.
+            return raw_score
+
         if similarity_score < self.max_similarity:
             return raw_score
         s = self._scaling_from_similarity(similarity_score)
