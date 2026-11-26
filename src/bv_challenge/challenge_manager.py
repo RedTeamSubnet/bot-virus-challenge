@@ -76,7 +76,7 @@ class BVChallengeManager(ChallengeManager):
             # Acceptance criteria
             miner_commit.accepted = (
                 miner_commit.penalty >= self.min_similarity
-                and miner_commit.penalty <= self.comparison_min_acceptable_score
+                and miner_commit.penalty < self.comparison_min_acceptable_score
                 and miner_commit.score >= self.min_score
             )
 
